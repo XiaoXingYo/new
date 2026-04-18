@@ -4,7 +4,7 @@ project_name: "crnn_ocr_base"
 # 数据配置
 data:
   height: 32  #手写或印刷体文本识别，图像通常会被归一化到固定高度（如 32 像素），宽度按比例缩放或固定（128 像素）
-  width: 128
+  width: 192
   chars: "0123456789+-*/="
   blank_label: 15 #处理字符之间的空白或重复字符 由于这里只对0-9这十个数进行识别之后若增加识别的字符要把它设置为最后一个数
   emnist_dir: "./data"
@@ -30,14 +30,9 @@ train:
   save_every: 5
   val_every: 1
   log_every: 50
-
-  # --- 修改点：直接指定为 cuda，发挥 RTX 5060 的性能 ---
   device: "cuda"
-
   output_dir: "./checkpoints"
   resume: null
-
-  # --- 新增：学习率调度器详细参数 ---
   scheduler:
     type: "OneCycleLR"  # OneCycleLR/StepLR/CosineAnnealingLR
     pct_start: 0.1      # WarmUp占比
