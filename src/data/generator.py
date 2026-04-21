@@ -51,15 +51,25 @@ class OCRDataGenerator:
         return np.zeros((28, 28), dtype=np.float32)
 
     def _generate_equation_string(self) -> str:
-        """随机生成符合数学逻辑的公式字符串"""
-        op = random.choice(['+', '-', '*', '/'])
-        num1_len = random.randint(1, 3)
-        num2_len = random.randint(1, 2)
+        """随机生成符合数学逻辑的公式字符串 (长短混合版，已修复单数字 bug)"""
+        # 🟢 核心修改：最短必须是 2 个运算块 (杜绝 96= 这种数据)
+        if random.random() < 0.5:
+            num_blocks = 2  # 强制生成 2 个块，必定包含一个运算符，比如: 12+3=
+        else:
+            num_blocks = random.randint(3, 4)  # 长公式，比如: 12+34-5*6=
 
-        num1 = "".join([str(random.randint(0, 9)) for _ in range(num1_len)])
-        num2 = "".join([str(random.randint(0, 9)) for _ in range(num2_len)])
+        ops = ['+', '-', '*', '/']
+        equation = ""
 
-        return f"{num1}{op}{num2}="
+        for i in range(num_blocks):
+            num_len = random.randint(1, 3)
+            num_str = "".join([str(random.randint(0, 9)) for _ in range(num_len)])
+            equation += num_str
+
+            if i < num_blocks - 1:
+                equation += random.choice(ops)
+
+        return equation + "="
 
     def generate_sample(self, seq_len_range: Tuple[int, int] = None) -> Tuple[np.ndarray, str]:
         """将字符串渲染成连续的图像张量"""
