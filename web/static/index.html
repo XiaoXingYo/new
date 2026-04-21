@@ -4,81 +4,177 @@
     <meta charset="UTF-8">
     <title>手写推演系统</title>
     <style>
-        body, html { margin: 0; padding: 0; width: 100%; height: 100%; background: #0d1117; overflow: hidden; font-family: monospace; }
-        canvas { display: block; cursor: crosshair; }
-        .controls { position: absolute; top: 20px; right: 20px; display: flex; gap: 10px; }
-        button { background: transparent; border: 1px solid #30363d; color: #8b949e; padding: 8px 16px; border-radius: 6px; cursor: pointer; transition: 0.2s; }
-        button:hover { border-color: #c9d1d9; color: #c9d1d9; }
-        #status { position: absolute; bottom: 20px; left: 20px; color: #484f58; font-size: 12px; }
+        body {
+            background-color: #f3f4f6;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            margin: 0;
+            font-family: -apple-system, sans-serif;
+        }
+        .canvas-container {
+            background: #ffffff;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.05);
+            border-radius: 12px;
+            padding: 30px;
+            text-align: center;
+        }
+        canvas {
+            /* 浅蓝色虚线边框，固定 800x400 尺寸 */
+            border: 2px dashed #93c5fd;
+            border-radius: 8px;
+            cursor: crosshair;
+            background: #ffffff;
+            display: block;
+            margin: 0 auto 20px;
+        }
+        .btn-group {
+            display: flex;
+            gap: 15px;
+            justify-content: center;
+            margin-bottom: 20px;
+        }
+        button {
+            padding: 10px 30px;
+            border: none;
+            border-radius: 6px;
+            font-size: 16px;
+            cursor: pointer;
+            color: #ffffff;
+            font-weight: bold;
+            transition: all 0.2s;
+        }
+        .btn-reset { background: #9ca3af; }
+        .btn-reset:hover { background: #6b7280; }
+        .btn-erase { background: #f87171; }
+        .btn-erase:hover { background: #ef4444; }
+        .btn-erase.active { box-shadow: 0 0 0 4px #fca5a5; }
+        .btn-submit { background: #3b82f6; }
+        .btn-submit:hover { background: #2563eb; }
+
+        #result-box {
+            font-size: 24px;
+            color: #1f2937;
+            min-height: 40px;
+            font-weight: bold;
+            padding: 10px;
+            border-radius: 8px;
+            background: #f9fafb;
+        }
+        .calc-res { color: #f59e0b; margin-left: 15px; }
     </style>
 </head>
 <body>
-    <div class="controls">
-        <button onclick="clearCanvas()">Clear</button>
+
+    <div class="canvas-container">
+        <canvas id="board" width="800" height="400"></canvas>
+
+        <div class="btn-group">
+            <button class="btn-reset" onclick="resetCanvas()">↻ 重置</button>
+            <button class="btn-erase" id="btnErase" onclick="toggleErase()">▱ 擦除</button>
+            <button class="btn-submit" onclick="submitCanvas()">↑ 提交</button>
+        </div>
+
+        <div id="result-box">等待输入...</div>
     </div>
-    <canvas id="board"></canvas>
-    <div id="status">Ready.</div>
 
     <script>
         const canvas = document.getElementById('board');
         const ctx = canvas.getContext('2d');
-        const status = document.getElementById('status');
-        let isDrawing = false, lastX = 0, lastY = 0, timer = null, maxX = 0;
+        const resultBox = document.getElementById('result-box');
+        const btnErase = document.getElementById('btnErase');
 
-        function resize() {
-            canvas.width = window.innerWidth;
-            canvas.height = window.innerHeight;
-            ctx.fillStyle = "#000";
+        let isDrawing = false, lastX = 0, lastY = 0;
+        let isEraser = false;
+
+        // 初始化白板
+        function initCanvas() {
+            ctx.fillStyle = "#ffffff";
             ctx.fillRect(0, 0, canvas.width, canvas.height);
             ctx.lineCap = 'round';
             ctx.lineJoin = 'round';
-            ctx.lineWidth = Math.max(15, Math.floor(window.innerHeight / 15));
         }
-        window.addEventListener('resize', resize); resize();
+        initCanvas();
 
-        function clearCanvas() { resize(); status.innerText = "Ready."; maxX = 0; }
+        function resetCanvas() {
+            initCanvas();
+            resultBox.innerText = "等待输入...";
+            if(isEraser) toggleErase(); // 关闭橡皮擦
+        }
 
-        canvas.addEventListener('mousedown', e => {
-            isDrawing = true; [lastX, lastY] = [e.clientX, e.clientY];
-            clearTimeout(timer);
-        });
+        function toggleErase() {
+            isEraser = !isEraser;
+            if(isEraser) {
+                btnErase.classList.add('active');
+                btnErase.innerText = "正在擦除...";
+            } else {
+                btnErase.classList.remove('active');
+                btnErase.innerText = "▱ 擦除";
+            }
+        }
 
-        canvas.addEventListener('mousemove', e => {
+        function start(e) {
+            isDrawing = true;
+            const rect = canvas.getBoundingClientRect();
+            lastX = (e.clientX || e.touches[0].clientX) - rect.left;
+            lastY = (e.clientY || e.touches[0].clientY) - rect.top;
+        }
+
+        function draw(e) {
             if (!isDrawing) return;
-            ctx.strokeStyle = '#c9d1d9';
-            ctx.beginPath(); ctx.moveTo(lastX, lastY); ctx.lineTo(e.clientX, e.clientY); ctx.stroke();
-            [lastX, lastY] = [e.clientX, e.clientY];
-            if (e.clientX > maxX) maxX = e.clientX;
-        });
+            e.preventDefault(); // 防止手机滑动
+            const rect = canvas.getBoundingClientRect();
+            const curX = (e.clientX || e.touches[0].clientX) - rect.left;
+            const curY = (e.clientY || e.touches[0].clientY) - rect.top;
 
-        canvas.addEventListener('mouseup', () => {
-            isDrawing = false;
-            status.innerText = "Processing...";
-            timer = setTimeout(triggerAI, 1200); // 停笔1.2秒自动触发
-        });
+            if(isEraser) {
+                ctx.strokeStyle = '#ffffff'; // 橡皮擦就是画白线
+                ctx.lineWidth = 30;
+            } else {
+                ctx.strokeStyle = '#111827'; // 黑色水笔
+                ctx.lineWidth = 6;           // 保持清爽的细笔画
+            }
 
-        async function triggerAI() {
-            const tmpCanvas = document.createElement('canvas');
-            tmpCanvas.width = canvas.width; tmpCanvas.height = canvas.height;
-            const tCtx = tmpCanvas.getContext('2d');
-            tCtx.fillStyle = "black"; tCtx.fillRect(0, 0, tmpCanvas.width, tmpCanvas.height);
-            tCtx.drawImage(canvas, 0, 0);
+            ctx.beginPath();
+            ctx.moveTo(lastX, lastY);
+            ctx.lineTo(curX, curY);
+            ctx.stroke();
+            [lastX, lastY] = [curX, curY];
+        }
 
+        function end() { isDrawing = false; }
+
+        canvas.addEventListener('mousedown', start);
+        canvas.addEventListener('mousemove', draw);
+        window.addEventListener('mouseup', end);
+
+        canvas.addEventListener('touchstart', start, {passive: false});
+        canvas.addEventListener('touchmove', draw, {passive: false});
+        window.addEventListener('touchend', end);
+
+        // 手动提交逻辑
+        async function submitCanvas() {
+            resultBox.innerText = "视觉解析中...";
             try {
+                // 直接发送包含白底黑字的 Base64，让后端去反转
+                const base64Data = canvas.toDataURL('image/jpeg', 0.9);
                 const res = await fetch('/api/recognize', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({ image_base64: tmpCanvas.toDataURL('image/jpeg', 0.8) })
+                    body: JSON.stringify({ image_base64: base64Data })
                 });
                 const data = await res.json();
-                status.innerText = `Recognized: ${data.result}`;
 
                 if (data.calc) {
-                    ctx.fillStyle = '#ff7b72'; // 柔和的警示红/橙
-                    ctx.font = 'bold 32px monospace';
-                    ctx.fillText(data.calc, maxX + 25, lastY + 10);
+                    resultBox.innerHTML = `识别: ${data.result} <span class="calc-res">答案: ${data.calc}</span>`;
+                } else {
+                    resultBox.innerText = `识别: ${data.result}`;
                 }
-            } catch (err) { status.innerText = "Error connected to local engine."; }
+            } catch (err) {
+                resultBox.innerText = "引擎连接中断，请检查后端运行状态。";
+            }
         }
     </script>
 </body>

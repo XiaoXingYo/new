@@ -43,7 +43,7 @@ train:
   early_stopping:
     enabled: true
     patience: 10        # CER不下降的最大epoch数
-    min_delta: 0.01     # 最小改进量
+    min_delta: 0.05     # 最小改进量
 
 # 推理配置
 inference:

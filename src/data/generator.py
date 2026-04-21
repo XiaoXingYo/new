@@ -21,7 +21,7 @@ class OCRDataGenerator:
 
     def _load_math_symbols(self):
         """静默加载清洗好的符号库"""
-        symbols_path = Path('../data/processed_symbols.npz')
+        symbols_path = Path(r'D:\work\new\data\processed_symbols.npz')
         if not symbols_path.exists():
             print("⚠️ 警告: 未找到 ./data/processed_symbols.npz，模型将只能生成纯数字。")
             return None
@@ -105,9 +105,11 @@ class OCRDataGenerator:
             # 计算下一个字符的光标起始位置 (符号通常占用的空间更大，重叠率要降低)
             min_ov, max_ov = self.config.data.overlap_range
             overlap = random.randint(min_ov, max_ov)
+            is_current_symbol = not char.isdigit()
             if not char.isdigit():
                 overlap = random.randint(-4, 0)  # 符号左右通常有间距，不重叠
-
+            else:
+                overlap = random.randint(min_ov, max_ov)
             x_cursor += (new_w - overlap)
 
         if self.augmentor:

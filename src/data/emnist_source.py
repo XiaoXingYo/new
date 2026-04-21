@@ -1,4 +1,5 @@
 import torch
+from sympy import true
 from torchvision import datasets, transforms
 import numpy as np
 from typing import Tuple
@@ -22,7 +23,7 @@ class EMNISTSource:
             root=self.data_dir,
             split=self.split,
             train=True,
-            download=True,
+            download=true,
             transform=transforms.ToTensor()
         )
 
