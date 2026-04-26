@@ -97,58 +97,56 @@ def stack_calculator(expression: str) -> str:
 # 4. 核心 API 端点
 @app.post("/api/recognize")
 async def recognize(data: ImageData):
-    # 1. 接收前端图像
     img_data = base64.b64decode(data.image_base64.split(",")[1])
-    # 注意：前端发来的是白底黑字，转为灰度图
     pil_image = Image.open(io.BytesIO(img_data)).convert('L')
 
-    # 2. 转为 OpenCV 格式并进行【颜色反转】(非常关键：模型只认黑底白字！)
     img_cv = np.array(pil_image, dtype=np.uint8)
-    img_cv = cv2.bitwise_not(img_cv)  # 变成黑底白字
+    img_cv = cv2.bitwise_not(img_cv)
 
-    # 3. 寻找真实笔画的边界框 (Bounding Box)
-    # 二值化，把稍微有点灰的都干掉，留下纯白的笔画
-    _, thresh = cv2.threshold(img_cv, 20, 255, cv2.THRESH_BINARY)
-    # 寻找所有的白色连通域
+    _, thresh = cv2.threshold(img_cv, 0, 255, cv2.THRESH_BINARY | cv2.THRESH_OTSU)
     contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
     if not contours:
         return {"result": "未检测到笔画", "calc": ""}
 
-    # 找到包裹所有笔画的最大矩形框 (x, y, w, h)
     x_min = min([cv2.boundingRect(c)[0] for c in contours])
     y_min = min([cv2.boundingRect(c)[1] for c in contours])
     x_max = max([cv2.boundingRect(c)[0] + cv2.boundingRect(c)[2] for c in contours])
     y_max = max([cv2.boundingRect(c)[1] + cv2.boundingRect(c)[3] for c in contours])
 
-    # 裁剪出真实包含笔画的区域
+    # 🌟 修复 1：裁剪前留出 5 像素安全边距，防止膨胀时边缘被截断！
+    margin = 5
+    x_min = max(0, x_min - margin)
+    y_min = max(0, y_min - margin)
+    x_max = min(img_cv.shape[1], x_max + margin)
+    y_max = min(img_cv.shape[0], y_max + margin)
+
     img_cropped = img_cv[y_min:y_max, x_min:x_max]
 
-    # 4. 形态学膨胀 (把前端细巧的笔画“催肥”，迎合模型的胃口)
-    kernel = np.ones((3, 3), np.uint8)
+    # 🌟 修复 2：针对拥挤字符，改用 2x2 的微小内核，或者直接注释掉这行不膨胀！
+    kernel = np.ones((2, 2), np.uint8)
     img_cropped = cv2.dilate(img_cropped, kernel, iterations=1)
 
-    # 5. 按照比例缩放到高度 28 像素
     h, w = img_cropped.shape
+
+    # 🌟 修复 3：底层防御，绝不允许除零错误干倒我们的服务！
+    if h == 0 or w == 0:
+        return {"result": "无效图像", "calc": ""}
+
     target_digit_h = 28
     scale = target_digit_h / float(h)
     new_w = max(1, int(w * scale))
     img_resized = cv2.resize(img_cropped, (new_w, target_digit_h), interpolation=cv2.INTER_LANCZOS4)
 
-    # 6. 放入高度为 32 的标准黑布中 (上下各留 2 像素气囊)
     canvas_h = 32
     pad_x = 16
     pad_y = (canvas_h - target_digit_h) // 2
     final_w = new_w + pad_x * 2
 
     final_img = np.zeros((canvas_h, final_w), dtype=np.float32)
-
-    # 归一化到 0~1，并贴入画板
     img_resized_norm = img_resized.astype(np.float32) / 255.0
-    img_resized_norm[img_resized_norm > 0.15] = 1.0  # 再次提纯
     final_img[pad_y:pad_y + target_digit_h, pad_x:pad_x + new_w] = img_resized_norm
 
-    # 7. 送入模型推理
     img_tensor = torch.from_numpy(final_img).unsqueeze(0).unsqueeze(0).to(device)
 
     with torch.no_grad():

@@ -159,7 +159,7 @@
             resultBox.innerText = "视觉解析中...";
             try {
                 // 直接发送包含白底黑字的 Base64，让后端去反转
-                const base64Data = canvas.toDataURL('image/jpeg', 0.9);
+                const base64Data = canvas.toDataURL('image/jpeg');
                 const res = await fetch('/api/recognize', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
