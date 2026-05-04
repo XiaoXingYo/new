@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI 视觉交互台</title>
+    <style>
+        /* 全局样式与变量 */
+        :root {
+            --bg-color: #f0f4f9;
+            --sidebar-bg: #f0f4f9;
+            --text-main: #1f1f1f;
+            --text-secondary: #444746;
+            --hover-bg: #e3e3e3;
+            --transition-speed: 0.3s;
+        }
+
+        body {
+            margin: 0;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-main);
+            display: flex;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        /* 左侧边栏 */
+        .sidebar {
+            width: 260px;
+            background-color: var(--sidebar-bg);
+            padding: 20px 15px;
+            box-sizing: border-box;
+            transition: margin-left var(--transition-speed) cubic-bezier(0.4, 0, 0.2, 1);
+            display: flex;
+            flex-direction: column;
+            flex-shrink: 0;
+            z-index: 10;
+        }
+
+        .sidebar.collapsed {
+            margin-left: -260px; /* 折叠隐藏 */
+        }
+
+        .menu-list {
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }
+
+        .menu-item {
+            padding: 12px 15px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 14px;
+            color: var(--text-secondary);
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            transition: background 0.2s;
+        }
+        .menu-item:hover { background-color: var(--hover-bg); }
+
+        /* 右侧主内容区 */
+        .main-container {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            position: relative;
+            min-width: 0;
+        }
+
+        /* 顶部导航 */
+        .topbar {
+            height: 64px;
+            padding: 0 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .topbar-left {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+
+        .menu-toggle {
+            background: none;
+            border: none;
+            cursor: pointer;
+            padding: 8px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: background 0.2s;
+        }
+        .menu-toggle:hover { background-color: var(--hover-bg); }
+        .menu-toggle svg { width: 24px; height: 24px; fill: #5f6368; }
+
+        .topbar-right {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+
+        .avatar {
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            background-color: #0288d1;
+            color: white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 16px;
+            font-weight: bold;
+            cursor: pointer;
+            user-select: none;
+            transition: opacity 0.2s;
+        }
+        .avatar:hover {
+            opacity: 0.8;
+        }
+
+        /* 中间内容区 */
+        .content-area {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            box-sizing: border-box;
+            position: relative;
+            width: 100%;
+        }
+
+        /* 欢迎占位符 */
+        .greeting-screen {
+            text-align: left;
+            width: 100%;
+            max-width: 800px;
+            margin-top: -10vh;
+            padding: 20px;
+        }
+        .greeting-screen h1 {
+            font-size: 40px;
+            font-weight: 500;
+            margin: 0 0 10px 0;
+            color: var(--text-main);
+        }
+        .greeting-screen h2 {
+            font-size: 40px;
+            font-weight: 500;
+            margin: 0;
+            color: #c4c7c5;
+        }
+
+        /* 应用嵌入框 */
+        #app-frame {
+            width: 100%;
+            height: 100%;
+            border: none;
+            border-radius: 12px;
+            background: transparent;
+            display: none;
+        }
+    </style>
+</head>
+<body>
+
+    <aside class="sidebar collapsed" id="sidebar">
+        <div class="menu-list">
+            <div class="menu-item" onclick="loadApp('sudoku.html')">
+                🔢 AI手写数独
+            </div>
+            <div class="menu-item" onclick="loadApp('calc.html')">
+                📝 手写推演系统
+            </div>
+        </div>
+    </aside>
+
+    <main class="main-container">
+        <header class="topbar">
+            <div class="topbar-left">
+                <button class="menu-toggle" onclick="toggleSidebar()">
+                    <svg viewBox="0 0 24 24"><path d="M3 18h18v-2H3v2zm0-5h18v-2H3v2zm0-7v2h18V6H3z"/></svg>
+                </button>
+            </div>
+            <div class="topbar-right">
+                <div class="avatar" onclick="loadApp('profile.html')">M</div>
+            </div>
+        </header>
+
+        <div class="content-area" id="main-content-area">
+            <div class="greeting-screen" id="greeting-screen">
+                <h1>Malinowski，你好</h1>
+                <h2>今天想让我做点什么？</h2>
+            </div>
+            <iframe id="app-frame" src=""></iframe>
+        </div>
+    </main>
+
+    <script>
+        // 侧边栏折叠/展开逻辑
+        function toggleSidebar() {
+            const sidebar = document.getElementById('sidebar');
+            sidebar.classList.toggle('collapsed');
+        }
+
+        // 专门给子页面和父页面调用的“自动收起”函数
+        function collapseSidebar() {
+            const sidebar = document.getElementById('sidebar');
+            if (!sidebar.classList.contains('collapsed')) {
+                sidebar.classList.add('collapsed');
+            }
+        }
+
+        // 加载对应的功能页面
+        function loadApp(pageUrl) {
+            document.getElementById('greeting-screen').style.display = 'none';
+            const appFrame = document.getElementById('app-frame');
+            appFrame.style.display = 'block';
+            appFrame.src = pageUrl;
+            // 加载页面时，顺便收起侧边栏
+            collapseSidebar();
+        }
+
+        // 点击父页面的背景时，也自动收起侧边栏
+        document.getElementById('main-content-area').addEventListener('mousedown', function() {
+            collapseSidebar();
+        });
+        document.getElementById('main-content-area').addEventListener('touchstart', function() {
+            collapseSidebar();
+        });
+    </script>
+</body>
+</html>

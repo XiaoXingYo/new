@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>用户主页</title>
+    <style>
+        :root {
+            --bg-color: #f7f8fa;
+            --card-bg: #ffffff;
+            --text-main: #262626;
+            --text-secondary: #8c8c8c;
+            --easy-color: #00b8a3;
+            --mid-color: #ffc01e;
+            --hard-color: #ff375f;
+            --border-color: #f0f0f0;
+        }
+
+        body {
+            margin: 0;
+            padding: 20px;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-main);
+            display: flex;
+            justify-content: center;
+            height: 100vh;
+            box-sizing: border-box;
+            overflow-y: auto;
+        }
+
+        .container {
+            display: flex;
+            gap: 20px;
+            max-width: 1100px;
+            width: 100%;
+        }
+
+        /* 左侧个人信息栏 */
+        .left-panel {
+            width: 280px;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+
+        .card {
+            background: var(--card-bg);
+            border-radius: 12px;
+            padding: 20px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.04);
+        }
+
+        .profile-header {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            margin-bottom: 15px;
+        }
+
+        .profile-avatar {
+            width: 72px;
+            height: 72px;
+            border-radius: 12px;
+            background: linear-gradient(135deg, #0288d1, #26c6da);
+            color: white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 32px;
+            font-weight: bold;
+        }
+
+        .profile-name { font-size: 20px; font-weight: 600; margin: 0; }
+        .profile-title { font-size: 13px; color: var(--text-secondary); margin-top: 4px; }
+
+        .rank-info {
+            font-size: 14px;
+            color: var(--text-secondary);
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 20px;
+        }
+        .rank-number { font-weight: 600; color: var(--text-main); font-size: 16px; }
+
+        .btn-edit {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #d9d9d9;
+            background: #fafafa;
+            border-radius: 6px;
+            color: #595959;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .btn-edit:hover { background: #f0f0f0; }
+
+        .tag-group {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-top: 15px;
+            border-top: 1px solid var(--border-color);
+            padding-top: 15px;
+        }
+        .tag {
+            background: #f0f5ff; color: #2f54eb;
+            padding: 4px 10px; border-radius: 4px; font-size: 12px;
+        }
+
+        /* 右侧数据看板 */
+        .right-panel {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+
+        /* 做题进度卡片 */
+        .progress-card {
+            display: flex;
+            align-items: center;
+            padding: 30px;
+        }
+
+        .chart-container {
+            position: relative;
+            width: 120px;
+            height: 120px;
+            margin-right: 40px;
+        }
+
+        .chart-bg { fill: none; stroke: #f0f0f0; stroke-width: 8; }
+        .chart-value { fill: none; stroke: var(--easy-color); stroke-width: 8; stroke-linecap: round; transform: rotate(-90deg); transform-origin: 50% 50%; stroke-dasharray: 314; stroke-dashoffset: 260;}
+        .chart-value-mid { fill: none; stroke: var(--mid-color); stroke-width: 8; stroke-linecap: round; transform: rotate(-90deg); transform-origin: 50% 50%; stroke-dasharray: 314; stroke-dashoffset: 290;}
+
+        .chart-center {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
+        }
+        .chart-center-num { font-size: 24px; font-weight: bold; color: var(--text-main); line-height: 1; }
+        .chart-center-total { font-size: 12px; color: var(--text-secondary); margin-top: 4px; }
+
+        .stats-details {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+        .stat-row { display: flex; align-items: center; font-size: 14px; background: #fafafa; padding: 10px 15px; border-radius: 8px;}
+        .stat-label { width: 50px; font-weight: 500; }
+        .stat-bar-bg { flex: 1; height: 8px; background: #e5e7eb; border-radius: 4px; margin: 0 15px; overflow: hidden;}
+        .stat-bar-fill { height: 100%; border-radius: 4px; }
+        .stat-count { width: 60px; text-align: right; font-weight: 500; color: var(--text-secondary); }
+        .stat-count span { color: var(--text-main); }
+
+        .lbl-easy { color: var(--easy-color); }
+        .lbl-mid { color: var(--mid-color); }
+        .lbl-hard { color: var(--hard-color); }
+        .bg-easy { background: var(--easy-color); width: 4.3%; } /* 46/1060 */
+        .bg-mid { background: var(--mid-color); width: 1.0%; } /* 22/2246 */
+        .bg-hard { background: var(--hard-color); width: 0.1%; } /* 1/997 */
+
+        /* 热力图卡片 */
+        .heatmap-header {
+            display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;
+        }
+        .heatmap-title { font-size: 16px; font-weight: 600; }
+        .heatmap-title span { color: var(--text-secondary); font-size: 14px; font-weight: normal; margin-left: 10px;}
+
+        .heatmap-grid {
+            display: grid;
+            grid-template-columns: repeat(52, 1fr);
+            grid-template-rows: repeat(7, 1fr);
+            gap: 3px;
+            width: 100%;
+        }
+
+        .day-cell {
+            aspect-ratio: 1;
+            background-color: #ebedf0;
+            border-radius: 2px;
+            transition: transform 0.1s;
+        }
+        .day-cell:hover { transform: scale(1.2); box-shadow: 0 0 4px rgba(0,0,0,0.2); }
+
+        .lvl-1 { background-color: #9be9a8; }
+        .lvl-2 { background-color: #40c463; }
+        .lvl-3 { background-color: #30a14e; }
+        .lvl-4 { background-color: #216e39; }
+
+        /* 新增：全局点击收起父页面侧边栏的逻辑 */
+        function notifyParentToCollapse() {
+            if (window.parent && window.parent.collapseSidebar) {
+                window.parent.collapseSidebar();
+            }
+        }
+        document.addEventListener('mousedown', notifyParentToCollapse);
+        document.addEventListener('touchstart', notifyParentToCollapse);
+
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <div class="left-panel">
+            <div class="card">
+                <div class="profile-header">
+                    <div class="profile-avatar">M</div>
+                    <div>
+                        <h1 class="profile-name">Malinowski</h1>
+                        <div class="profile-title">深度学习 / 计算机视觉</div>
+                    </div>
+                </div>
+
+                <div class="rank-info">
+                    <span>全站排名</span>
+                    <span class="rank-number">100,000</span>
+                </div>
+
+                <button class="btn-edit">编辑个人资料</button>
+
+                <div class="tag-group">
+                    <span class="tag">CRNN 架构</span>
+                    <span class="tag">Beam Search</span>
+                    <span class="tag">PyTorch</span>
+                    <span class="tag">OpenCV</span>
+                </div>
+            </div>
+
+            <div class="card" style="min-height: 120px;">
+                <div style="font-size: 14px; font-weight: 600; margin-bottom: 15px;">勋章成就</div>
+                <div style="color: var(--text-secondary); font-size: 32px; text-align: center; margin-top: 20px;">0</div>
+                <div style="color: var(--text-secondary); font-size: 12px; text-align: center; margin-top: 10px;">即将获得：月度每日一题打卡</div>
+            </div>
+        </div>
+
+        <div class="right-panel">
+
+            <div class="card progress-card">
+                <div class="chart-container">
+                    <svg width="120" height="120" viewBox="0 0 120 120">
+                        <circle class="chart-bg" cx="60" cy="60" r="50"></circle>
+                        <circle class="chart-value" cx="60" cy="60" r="50"></circle>
+                        <circle class="chart-value-mid" cx="60" cy="60" r="50"></circle>
+                    </svg>
+                    <div class="chart-center">
+                        <div class="chart-center-num">69</div>
+                        <div class="chart-center-total">/ 4303</div>
+                        <div class="chart-center-total" style="color:#00b8a3; margin-top: 2px;">✓ 已解答</div>
+                    </div>
+                </div>
+
+                <div class="stats-details">
+                    <div class="stat-row">
+                        <div class="stat-label lbl-easy">简单</div>
+                        <div class="stat-bar-bg"><div class="stat-bar-fill bg-easy"></div></div>
+                        <div class="stat-count"><span>46</span> / 1060</div>
+                    </div>
+                    <div class="stat-row">
+                        <div class="stat-label lbl-mid">中等</div>
+                        <div class="stat-bar-bg"><div class="stat-bar-fill bg-mid"></div></div>
+                        <div class="stat-count"><span>22</span> / 2246</div>
+                    </div>
+                    <div class="stat-row">
+                        <div class="stat-label lbl-hard">困难</div>
+                        <div class="stat-bar-bg"><div class="stat-bar-fill bg-hard"></div></div>
+                        <div class="stat-count"><span>1</span> / 997</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="heatmap-header">
+                    <div class="heatmap-title">过去一年共提交 <span>69 次</span></div>
+                    <div style="font-size: 13px; color: var(--text-secondary);">累计提交天数：28 &nbsp;|&nbsp; 连续提交：3</div>
+                </div>
+                <div class="heatmap-grid" id="heatmap"></div>
+            </div>
+
+        </div>
+    </div>
+
+    <script>
+        // 动态生成 GitHub/LeetCode 风格的热力图格子
+        const heatmap = document.getElementById('heatmap');
+        const totalDays = 52 * 7; // 一年 52 周
+
+        for (let i = 0; i < totalDays; i++) {
+            const cell = document.createElement('div');
+            cell.classList.add('day-cell');
+
+            // 随机生成一些提交记录（为了让图表看起来真实）
+            // 越靠后的日期，活跃度越高
+            let activeChance = i > 250 ? 0.3 : 0.05;
+
+            if (Math.random() < activeChance) {
+                const intensity = Math.floor(Math.random() * 4) + 1;
+                cell.classList.add(`lvl-${intensity}`);
+                cell.title = `提交了 ${intensity * 2} 次`; // 鼠标悬停提示
+            } else {
+                cell.title = "无提交";
+            }
+
+            heatmap.appendChild(cell);
+        }
+    </script>
+</body>
+</html>
