@@ -29,8 +29,8 @@ class OCRAugmentor:
     def elastic_transform(self, image: np.ndarray) -> np.ndarray:
         """真正的弹性形变 (基于像素网格的局部扭曲)"""
         if random.random() < self.elastic_prob:
-            alpha = image.shape[1] * 0.2  # 形变强度
-            sigma = image.shape[1] * 0.08  # 平滑度
+            alpha = image.shape[0] * 0.15  # 形变强度
+            sigma = image.shape[0] * 0.08  # 平滑度
 
             random_state = np.random.RandomState(None)
             shape = image.shape
@@ -97,15 +97,14 @@ class OCRAugmentor:
     def apply(self, image: np.ndarray) -> np.ndarray:
         """理顺流水线，杜绝重复破坏"""
         # 1. 模拟网格轻微形变
-        image = self.elastic_transform(image)
-
+        if random.random() < 0.1:
+            image = self.elastic_transform(image)
         # 2. 全局提亮：拯救 EMNIST 里那些下笔太轻、发灰发虚的数字
-        image = np.clip(image * 1.15, 0.0, 1.0)
-
+        # image = np.clip(image * 1.15, 0.0, 1.0)
         # 3. 模拟微创断笔
         image = self.simulate_pen_skip(image)
-
         # 4. 增加轻微噪点 (修复了之前连续调用两次的问题)
+        self.noise_prob = 0.1
         image = self.add_noise(image)
 
         return image

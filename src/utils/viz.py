@@ -40,19 +40,26 @@ def visualize_predictions(images: torch.Tensor,
                           predictions: List[str],
                           ground_truths: List[str],
                           save_path: str,
-                          num_samples: int = 10):
-    """可视化预测结果"""
+                          num_samples: int = 10,
+                          is_preview: bool = False):
+    """可视化预测结果 或 预览训练数据"""
     fig, axes = plt.subplots(2, 5, figsize=(15, 6))
     axes = axes.flatten()
 
     for i in range(min(num_samples, len(images))):
         img = images[i].cpu().numpy().squeeze()
-        pred = predictions[i]
         gt = ground_truths[i]
 
         axes[i].imshow(img, cmap='gray')
-        axes[i].set_title(f'P: {pred}\nG: {gt}',
-                          color='green' if pred == gt else 'red')
+
+        # 🌟 核心修改：如果是预览模式，只显示蓝色 Label；否则显示 P 和 G
+        if is_preview:
+            axes[i].set_title(f'Label: {gt}', color='blue')
+        else:
+            pred = predictions[i]
+            axes[i].set_title(f'P: {pred}\nG: {gt}',
+                              color='green' if pred == gt else 'red')
+
         axes[i].axis('off')
 
     plt.tight_layout()

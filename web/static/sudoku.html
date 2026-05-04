@@ -1,0 +1,389 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>AI手写数独</title>
+    <style>
+        :root {
+            --border-color: #2c3e50;
+            --cell-size: 50px;
+            --highlight: #e8f0fe;
+            --error: #ffcfcf;
+            --primary: #3b82f6;
+        }
+
+        body {
+            background-color: #f3f4f6;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            font-family: -apple-system, sans-serif;
+            margin: 0;
+            padding: 20px;
+        }
+
+        h1 { color: #1f2937; margin-bottom: 10px; }
+        .subtitle { color: #6b7280; margin-bottom: 15px; font-size: 14px; }
+
+        /* 状态栏 */
+        .stats { margin-bottom: 20px; font-size: 16px; font-weight: bold; color: #4b5563; }
+        #timer { color: #f59e0b; font-family: monospace; font-size: 18px; }
+
+        /* 数独棋盘样式 */
+        #sudoku-board {
+            display: grid;
+            border: 3px solid var(--border-color);
+            background-color: white;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.05);
+            margin-bottom: 20px;
+        }
+
+        .cell {
+            width: var(--cell-size);
+            height: var(--cell-size);
+            border: 0.5px solid #dcdde1;
+            text-align: center;
+            line-height: var(--cell-size);
+            font-size: 24px;
+            cursor: pointer;
+            box-sizing: border-box;
+            transition: background 0.1s;
+        }
+        .cell:hover:not(.fixed) { background-color: var(--highlight); }
+        .thick-right { border-right: 3px solid var(--border-color) !important; }
+        .thick-bottom { border-bottom: 3px solid var(--border-color) !important; }
+        .fixed { background-color: #f9fafb; font-weight: bold; color: #1f2937; cursor: default; }
+        .invalid { color: #ef4444; background-color: var(--error); }
+        .user-filled { color: var(--primary); font-family: "Comic Sans MS", cursive, sans-serif; }
+
+        /* 底部控制栏 */
+        .controls { display: flex; gap: 15px; align-items: center; }
+        select { padding: 10px; border-radius: 6px; border: 1px solid #dcdde1; outline: none; font-size: 14px; background: white;}
+        .btn-new { background: var(--primary); color: white; border: none; padding: 10px 20px; border-radius: 6px; font-size: 16px; cursor: pointer; font-weight: bold;}
+        .btn-new:hover { background: #2563eb; }
+
+        /* 画板遮罩层 */
+        #modal-overlay {
+            display: none;
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.5);
+            justify-content: center; align-items: center;
+            z-index: 1000;
+        }
+
+        .canvas-container {
+            background: #ffffff;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.2);
+            border-radius: 12px;
+            padding: 30px;
+            text-align: center;
+            position: relative;
+        }
+
+        .close-btn { position: absolute; top: 10px; right: 15px; font-size: 20px; cursor: pointer; color: #9ca3af; }
+        .close-btn:hover { color: #1f2937; }
+
+        canvas {
+            border: 2px dashed #93c5fd; border-radius: 8px; cursor: crosshair;
+            background: #ffffff; display: block; margin: 0 auto 20px;
+        }
+
+        .btn-group { display: flex; gap: 10px; justify-content: center; margin-bottom: 10px; }
+        button { padding: 10px 20px; border: none; border-radius: 6px; font-size: 14px; cursor: pointer; color: #ffffff; font-weight: bold; transition: all 0.2s; }
+        .btn-reset { background: #9ca3af; } .btn-reset:hover { background: #6b7280; }
+        .btn-erase { background: #f87171; } .btn-erase:hover { background: #ef4444; } .btn-erase.active { box-shadow: 0 0 0 4px #fca5a5; }
+        .btn-submit { background: var(--primary); } .btn-submit:hover { background: #2563eb; }
+
+        #result-box { font-size: 16px; color: #6b7280; min-height: 20px; }
+    </style>
+</head>
+<body>
+
+    <h1>手写数独</h1>
+    <div class="subtitle">点击空白格子，进行手写识别</div>
+
+    <div class="stats">
+        规模: <span id="display-size">9x9</span> |
+        难度: <span id="display-diff">普通</span> |
+        计时: <span id="timer">00:00</span>
+    </div>
+
+    <div id="sudoku-board"></div>
+
+    <div class="controls">
+        <select id="size-select">
+            <option value="4">4 x 4 (入门)</option>
+            <option value="6">6 x 6 (进阶)</option>
+            <option value="9" selected>9 x 9 (经典)</option>
+        </select>
+        <select id="diff-select">
+            <option value="0.3">简单</option>
+            <option value="0.5" selected>普通</option>
+            <option value="0.7">困难</option>
+        </select>
+        <button class="btn-new" onclick="newGame()">生成新对局</button>
+    </div>
+
+    <div id="modal-overlay">
+        <div class="canvas-container">
+            <span class="close-btn" onclick="closePad()">✖</span>
+            <h3 id="pad-title">请写下一个数字</h3>
+            <canvas id="board" width="300" height="300"></canvas>
+
+            <div class="btn-group">
+                <button class="btn-reset" onclick="resetCanvas()">↻ 重置</button>
+                <button class="btn-erase" id="btnErase" onclick="toggleErase()">▱ 擦除</button>
+                <button class="btn-submit" onclick="submitCanvas()">↑ 提交并填入</button>
+            </div>
+            <div id="result-box">等待书写...</div>
+        </div>
+    </div>
+
+    <script>
+        // --- 新增：全局点击收起侧边栏逻辑 ---
+        function notifyParentToCollapse() {
+            if (window.parent && window.parent.collapseSidebar) {
+                window.parent.collapseSidebar();
+            }
+        }
+        document.addEventListener('mousedown', notifyParentToCollapse);
+        document.addEventListener('touchstart', notifyParentToCollapse);
+        // -----------------------------------
+
+        const boardElement = document.getElementById('sudoku-board');
+        let solution = [];
+        let currentTargetCell = null;
+        let currentSize = 9;
+        let seconds = 0;
+        let timerInterval = null;
+
+        function solve(grid, size) {
+            for (let r = 0; r < size; r++) {
+                for (let c = 0; c < size; c++) {
+                    if (grid[r][c] === 0) {
+                        let nums = Array.from({length: size}, (_, i) => i + 1).sort(() => Math.random() - 0.5);
+                        for (let n of nums) {
+                            if (isValid(grid, r, c, n, size)) {
+                                grid[r][c] = n;
+                                if (solve(grid, size)) return true;
+                                grid[r][c] = 0;
+                            }
+                        }
+                        return false;
+                    }
+                }
+            }
+            return true;
+        }
+
+        function isValid(grid, r, c, n, size) {
+            const boxH = size === 6 ? 2 : Math.sqrt(size);
+            const boxW = size === 6 ? 3 : Math.sqrt(size);
+            for (let i = 0; i < size; i++) {
+                if (grid[r][i] == n || grid[i][c] == n) return false;
+            }
+            const startR = Math.floor(r / boxH) * boxH;
+            const startC = Math.floor(c / boxW) * boxW;
+            for (let i = 0; i < boxH; i++) {
+                for (let j = 0; j < boxW; j++) {
+                    if (grid[startR + i][startC + j] == n) return false;
+                }
+            }
+            return true;
+        }
+
+        function newGame() {
+            currentSize = parseInt(document.getElementById('size-select').value);
+            const diffRate = parseFloat(document.getElementById('diff-select').value);
+
+            document.getElementById('display-size').innerText = `${currentSize}x${currentSize}`;
+            document.getElementById('display-diff').innerText = document.getElementById('diff-select').options[document.getElementById('diff-select').selectedIndex].text;
+
+            const grid = Array.from({ length: currentSize }, () => Array(currentSize).fill(0));
+            solve(grid, currentSize);
+            solution = grid.map(row => [...row]);
+
+            const playable = grid.map(row => [...row]);
+            let holes = Math.floor(currentSize * currentSize * diffRate);
+            while (holes > 0) {
+                let r = Math.floor(Math.random() * currentSize);
+                let c = Math.floor(Math.random() * currentSize);
+                if (playable[r][c] !== 0) {
+                    playable[r][c] = 0;
+                    holes--;
+                }
+            }
+
+            renderSudoku(playable);
+            startTimer();
+        }
+
+        function renderSudoku(grid) {
+            boardElement.innerHTML = '';
+            boardElement.style.gridTemplateColumns = `repeat(${currentSize}, var(--cell-size))`;
+            boardElement.style.gridTemplateRows = `repeat(${currentSize}, var(--cell-size))`;
+
+            const boxH = currentSize === 6 ? 2 : Math.sqrt(currentSize);
+            const boxW = currentSize === 6 ? 3 : Math.sqrt(currentSize);
+
+            grid.forEach((row, r) => {
+                row.forEach((num, c) => {
+                    const cell = document.createElement('div');
+                    cell.classList.add('cell');
+
+                    if ((c + 1) % boxW === 0 && c !== currentSize - 1) cell.classList.add('thick-right');
+                    if ((r + 1) % boxH === 0 && r !== currentSize - 1) cell.classList.add('thick-bottom');
+
+                    if (num !== 0) {
+                        cell.innerText = num;
+                        cell.classList.add('fixed');
+                    } else {
+                        cell.onclick = () => openPad(r, c, cell);
+                    }
+                    boardElement.appendChild(cell);
+                });
+            });
+        }
+
+        function startTimer() {
+            clearInterval(timerInterval);
+            seconds = 0;
+            document.getElementById('timer').innerText = "00:00";
+            timerInterval = setInterval(() => {
+                seconds++;
+                const m = Math.floor(seconds / 60).toString().padStart(2, '0');
+                const s = (seconds % 60).toString().padStart(2, '0');
+                document.getElementById('timer').innerText = `${m}:${s}`;
+            }, 1000);
+        }
+
+        function verifyCell(r, c, val, element) {
+            element.innerText = val;
+            element.classList.add('user-filled');
+            if (parseInt(val) !== solution[r][c]) {
+                element.classList.add('invalid');
+            } else {
+                element.classList.remove('invalid');
+                checkWin();
+            }
+        }
+
+        function checkWin() {
+            const cells = document.querySelectorAll('.cell');
+            const win = Array.from(cells).every(c => c.innerText != '' && !c.classList.contains('invalid'));
+            if (win) {
+                clearInterval(timerInterval);
+                alert(`太厉害了！AI 和你一起用时 ${document.getElementById('timer').innerText} 完成了挑战！`);
+            }
+        }
+
+        const modal = document.getElementById('modal-overlay');
+        const canvas = document.getElementById('board');
+        const ctx = canvas.getContext('2d');
+        const resultBox = document.getElementById('result-box');
+        const btnErase = document.getElementById('btnErase');
+        const padTitle = document.getElementById('pad-title');
+
+        let isDrawing = false, lastX = 0, lastY = 0, isEraser = false;
+
+        function initCanvas() {
+            ctx.fillStyle = "#ffffff";
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+        }
+
+        function resetCanvas() {
+            initCanvas();
+            resultBox.innerText = "等待书写...";
+            if(isEraser) toggleErase();
+        }
+
+        function openPad(r, c, element) {
+            currentTargetCell = { r, c, element };
+            padTitle.innerText = `请写下数字 (1-${currentSize})`;
+            modal.style.display = 'flex';
+            resetCanvas();
+        }
+
+        function closePad() {
+            modal.style.display = 'none';
+            currentTargetCell = null;
+        }
+
+        function toggleErase() {
+            isEraser = !isEraser;
+            if(isEraser) {
+                btnErase.classList.add('active'); btnErase.innerText = "正在擦除...";
+            } else {
+                btnErase.classList.remove('active'); btnErase.innerText = "▱ 擦除";
+            }
+        }
+
+        function start(e) {
+            isDrawing = true;
+            const rect = canvas.getBoundingClientRect();
+            lastX = (e.clientX || e.touches[0].clientX) - rect.left;
+            lastY = (e.clientY || e.touches[0].clientY) - rect.top;
+        }
+
+        function draw(e) {
+            if (!isDrawing) return;
+            e.preventDefault();
+            const rect = canvas.getBoundingClientRect();
+            const curX = (e.clientX || e.touches[0].clientX) - rect.left;
+            const curY = (e.clientY || e.touches[0].clientY) - rect.top;
+
+            if(isEraser) {
+                ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 30;
+            } else {
+                ctx.strokeStyle = '#111827'; ctx.lineWidth = 12;
+            }
+
+            ctx.beginPath();
+            ctx.moveTo(lastX, lastY);
+            ctx.lineTo(curX, curY);
+            ctx.stroke();
+            [lastX, lastY] = [curX, curY];
+        }
+
+        function end() { isDrawing = false; }
+
+        canvas.addEventListener('mousedown', start); canvas.addEventListener('mousemove', draw); window.addEventListener('mouseup', end);
+        canvas.addEventListener('touchstart', start, {passive: false}); canvas.addEventListener('touchmove', draw, {passive: false}); window.addEventListener('touchend', end);
+
+        async function submitCanvas() {
+            resultBox.innerText = "视觉模型解析中...";
+            try {
+                const base64Data = canvas.toDataURL('image/jpeg');
+                const res = await fetch('/api/recognize', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ image_base64: base64Data })
+                });
+                const data = await res.json();
+
+                let rawResult = data.result || "";
+                let digitMatch = rawResult.match(/[1-9]/);
+
+                if (digitMatch && currentTargetCell) {
+                    const digit = parseInt(digitMatch[0]);
+
+                    if (digit > currentSize) {
+                        resultBox.innerText = `识别为 ${digit}，但当前规模最大只能填 ${currentSize} 哦。`;
+                        return;
+                    }
+
+                    verifyCell(currentTargetCell.r, currentTargetCell.c, digit, currentTargetCell.element);
+                    closePad();
+                } else {
+                    resultBox.innerText = `模型看到了 "${rawResult}"，没找到有效数字，请重写。`;
+                }
+            } catch (err) {
+                resultBox.innerText = "引擎连接中断，请检查 FastAPI 后端运行状态。";
+            }
+        }
+
+        newGame();
+    </script>
+</body>
+</html>

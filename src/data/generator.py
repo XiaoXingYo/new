@@ -3,31 +3,37 @@ import cv2
 import random
 from pathlib import Path
 from typing import Tuple
-from .emnist_source import EMNISTSource
 
 
 class OCRDataGenerator:
-    """全面升级的 OCR 数据生成工厂 (支持数字+公式双模式)"""
+    """全面升级的 OCR 数据生成工厂 (终极形态：纯净数据直供版 + 均衡乘除法 + 视觉特征保护)"""
 
     def __init__(self, config):
         self.config = config
-        self.source = EMNISTSource(config.data.emnist_dir)
 
         from .augmentor import OCRAugmentor
         self.augmentor = OCRAugmentor(config) if config.data.augment else None
 
-        # 挂载自定义的数学符号引擎
+        # 1. 直接加载你清洗好的两座纯净数据金矿
+        self.digits = self._load_digits()
         self.symbols = self._load_math_symbols()
 
+    def _load_digits(self):
+        """加载纯净版 0-9 数字字库"""
+        digits_path = Path(r'D:\work\new\data\processed_digits.npz')
+        if not digits_path.exists():
+            print(f"⚠️ 找不到清洗后的数字字库: {digits_path}")
+            return None
+        data = np.load(digits_path)
+        return {str(i): data.get(str(i)) for i in range(10)}
+
     def _load_math_symbols(self):
-        """静默加载清洗好的符号库"""
+        """加载纯净版数学符号字库"""
         symbols_path = Path(r'D:\work\new\data\processed_symbols.npz')
         if not symbols_path.exists():
-            print("⚠️ 警告: 未找到 ./data/processed_symbols.npz，模型将只能生成纯数字。")
+            print(f"⚠️ 找不到清洗后的符号字库: {symbols_path}")
             return None
-
         data = np.load(symbols_path)
-        # 建立 字符 -> numpy 数组 的映射
         return {
             '+': data.get('plus'),
             '-': data.get('minus'),
@@ -37,47 +43,95 @@ class OCRDataGenerator:
         }
 
     def _get_char_image(self, char: str) -> np.ndarray:
-        """统一的字符获取接口 (根据字符自动路由到底层图库)"""
-        if char.isdigit():
-            # 数字走 EMNIST 获取
-            return self.source.get_digit_by_label(int(char))
+        """统一字符获取：既然已经是干净数据，拿到手直接用，不做任何二次过滤"""
+        images = None
+
+        if char.isdigit() and self.digits:
+            images = self.digits.get(char)
         elif self.symbols and char in self.symbols:
-            # 符号走自定义图库获取
-            images = self.symbols[char]
-            if images is not None and len(images) > 0:
-                idx = random.randint(0, len(images) - 1)
-                return images[idx]
-        # 兜底：如果找不到，返回一张全黑的图
+            images = self.symbols.get(char)
+
+        if images is not None and len(images) > 0:
+            idx = random.randint(0, len(images) - 1)
+            # 🌟 直接返回 28x28 原始阵列
+            return images[idx]
+
+        # 兜底返回空白图
         return np.zeros((28, 28), dtype=np.float32)
 
     def _generate_equation_string(self) -> str:
-        """随机生成符合数学逻辑的公式字符串 (长短混合版，已修复单数字 bug)"""
-        # 🟢 核心修改：最短必须是 2 个运算块 (杜绝 96= 这种数据)
-        if random.random() < 0.5:
-            num_blocks = 2  # 强制生成 2 个块，必定包含一个运算符，比如: 12+3=
+        """随机生成符合数学逻辑的公式，强制均衡四则运算，并计算出真正的正确答案"""
+
+        # 强制均衡生成不同类型的算式，确保乘除法占比
+        mode = random.choice(['add_sub', 'mul', 'div', 'mixed'])
+
+        if mode == 'div':
+            # 逆向构造除法：先生成除数和结果，再算出被除数，保证绝对能整除
+            divisor = random.randint(2, 99)
+            result = random.randint(1, 99)
+            dividend = divisor * result
+            equation = f"{dividend}/{divisor}"
+            ans_str = str(result)
+
+        elif mode == 'mul':
+            # 限制乘数大小，防止结果过大导致序列超长
+            num1 = random.randint(2, 99)
+            num2 = random.randint(2, 99)
+            equation = f"{num1}*{num2}"
+            ans_str = str(num1 * num2)
+
         else:
-            num_blocks = random.randint(3, 4)  # 长公式，比如: 12+34-5*6=
+            # 纯加减法 或 包含多种运算的混合模式
+            ops = ['+', '-'] if mode == 'add_sub' else ['+', '-', '*', '/']
+            while True:
+                # 随机决定运算块的数量
+                if random.random() < 0.5:
+                    num_blocks = 2
+                else:
+                    num_blocks = random.randint(3, 4)
 
-        ops = ['+', '-', '*', '/']
-        equation = ""
+                equation_temp = ""
+                for i in range(num_blocks):
+                    # 动态生成数字：防止出现 "05" 这种带前导零的数字
+                    num_len = random.randint(1, 3)
+                    if num_len == 1:
+                        num_str = str(random.randint(0, 9))
+                    else:
+                        first_digit = str(random.randint(1, 9))
+                        rest_digits = "".join([str(random.randint(0, 9)) for _ in range(num_len - 1)])
+                        num_str = first_digit + rest_digits
 
-        for i in range(num_blocks):
-            num_len = random.randint(1, 3)
-            num_str = "".join([str(random.randint(0, 9)) for _ in range(num_len)])
-            equation += num_str
+                    equation_temp += num_str
 
-            if i < num_blocks - 1:
-                equation += random.choice(ops)
+                    if i < num_blocks - 1:
+                        equation_temp += random.choice(ops)
 
-        return equation + "="
+                try:
+                    # 用 eval 算出结果
+                    ans = eval(equation_temp)
+                    # 过滤条件
+                    if ans == int(ans) and abs(ans) < 10000:
+                        ans_str = str(int(ans))
+                        equation = equation_temp
+                        break
+                except (ZeroDivisionError, SyntaxError):
+                    continue
+
+        # 3. 大幅提高完整公式（带有计算结果）的生成比例，强化 CTC 上下文记忆
+        rand_val = random.random()
+        if rand_val < 0.2:
+            return equation  # 20% 纯算式 (如: 12+34)
+        elif rand_val < 0.3:
+            return equation + "="  # 10% 悬念式，增加等号鲁棒性 (如: 12+34=)
+        else:
+            return equation + "=" + ans_str  # 70% 完整公式 (如: 12+34=46)
 
     def generate_sample(self, seq_len_range: Tuple[int, int] = None) -> Tuple[np.ndarray, str]:
-        """将字符串渲染成连续的图像张量"""
         h, w = self.config.data.height, self.config.data.width
         canvas = np.zeros((h, w), dtype=np.float32)
 
-        # 50% 概率生成公式，50% 概率生成纯数字串
-        if self.symbols and random.random() < 0.5:
+        # 大幅降低纯数字序列的比例，90%的概率生成公式算式
+        if self.symbols and random.random() < 0.9:
             target_str = self._generate_equation_string()
         else:
             if seq_len_range is None:
@@ -85,41 +139,63 @@ class OCRDataGenerator:
             seq_len = random.randint(*seq_len_range)
             target_str = "".join([str(random.randint(0, 9)) for _ in range(seq_len)])
 
-        x_cursor = random.randint(5, 15)
+        # 左侧铺设安全跑道，解决首字母丢失
+        x_cursor = random.randint(20, 30)
         label_result = ""
 
-        for char in target_str:
+        for i, char in enumerate(target_str):
             char_img = self._get_char_image(char)
 
-            # 随机缩放 (模拟字号大小变化)
-            scale = random.uniform(0.8, 1.1)
-            char_h, char_w = char_img.shape
-            new_h = min(int(char_h * scale), h - 2)
-            new_w = max(1, int(char_w * scale))
-            char_img = cv2.resize(char_img, (new_w, new_h))
+            # 【新增防护】专门针对乘号：绝对不缩小，保护其密集的交叉线条特征不被压糊
+            if char == '*':
+                scale = random.uniform(0.95, 1.1)
+            else:
+                scale = random.uniform(0.75, 1.0)
 
-            # 垂直位置扰动
-            y_offset = (h - new_h) // 2 + random.randint(-4, 4)
+            char_h, char_w = char_img.shape
+            new_h = int(char_h * scale)
+            new_w = max(1, int(char_w * scale))
+            char_img = cv2.resize(char_img, (new_w, new_h), interpolation=cv2.INTER_AREA)
+
+            # 暴力提亮：把因为缩小而变灰的像素重新拉到纯白
+            char_img = np.clip(char_img * 1.5, 0.0, 1.0)
+
+            # 动态计算纵向安全扰动区，确保上下至少有 1 像素绝对安全气囊
+            margin = 1
+            max_r = max(0, (h - new_h) // 2 - margin)
+            if max_r > 0:
+                y_offset = (h - new_h) // 2 + random.randint(-max_r, max_r)
+            else:
+                y_offset = (h - new_h) // 2
+
             y_offset = np.clip(y_offset, 0, h - new_h)
 
-            # 越界保护
-            if x_cursor + new_w >= w - 4:
+            # 右侧铺设缓冲防撞区，解决末尾被一刀切
+            if x_cursor + new_w >= w - 20:
                 break
 
             label_result += char
 
-            # 粘贴 (使用最大值融合，防止覆盖已有笔画)
+            # 粘贴图像 (最大值融合)
             roi = canvas[y_offset:y_offset + new_h, x_cursor:x_cursor + new_w]
             canvas[y_offset:y_offset + new_h, x_cursor:x_cursor + new_w] = np.maximum(roi, char_img)
 
-            # 计算下一个字符的光标起始位置 (符号通常占用的空间更大，重叠率要降低)
             min_ov, max_ov = self.config.data.overlap_range
-            overlap = random.randint(min_ov, max_ov)
-            is_current_symbol = not char.isdigit()
-            if not char.isdigit():
-                overlap = random.randint(-4, 0)  # 符号左右通常有间距，不重叠
+
+            # 精准控制字符间距 (Overlap 控制核心)
+            if i > 0 and char == target_str[i - 1]:
+                # 针对 "44"、"88" 这种连续相同字符：绝对不允许重叠
+                overlap = random.randint(-4, -2)
+            elif char in ['*', '/']:
+                # 【新增防护】专门针对乘除号：强行留白，设置安全气囊防粘连，防止被前面的数字带成连笔
+                overlap = random.randint(-6, -3)
+            elif char in ['+', '-', '=']:
+                # 针对其他符号：不允许高度重叠，允许轻微靠近
+                overlap = random.randint(-2, 1)
             else:
+                # 普通不同数字：走配置的默认挤压范围
                 overlap = random.randint(min_ov, max_ov)
+
             x_cursor += (new_w - overlap)
 
         if self.augmentor:

@@ -124,8 +124,8 @@ async def recognize(data: ImageData):
     img_cropped = img_cv[y_min:y_max, x_min:x_max]
 
     # 🌟 修复 2：针对拥挤字符，改用 2x2 的微小内核，或者直接注释掉这行不膨胀！
-    kernel = np.ones((2, 2), np.uint8)
-    img_cropped = cv2.dilate(img_cropped, kernel, iterations=1)
+    # kernel = np.ones((2, 2), np.uint8)
+    # img_cropped = cv2.dilate(img_cropped, kernel, iterations=1)
 
     h, w = img_cropped.shape
 
@@ -135,18 +135,23 @@ async def recognize(data: ImageData):
 
     target_digit_h = 28
     scale = target_digit_h / float(h)
-    new_w = max(1, int(w * scale))
-    img_resized = cv2.resize(img_cropped, (new_w, target_digit_h), interpolation=cv2.INTER_LANCZOS4)
-
+    new_w = max(1, int(w * scale*1.3))
+    img_resized = cv2.resize(img_cropped, (new_w, target_digit_h), interpolation=cv2.INTER_AREA)
+    kernel = cv2.getStructuringElement(cv2.MORPH_CROSS, (2, 2))
+    img_resized = cv2.dilate(img_resized, kernel, iterations=1)
     canvas_h = 32
-    pad_x = 16
+    config_w = 192
+    pad_x = 24  # 模拟训练集 x_cursor 的起始位置
+    # 如果用户写得实在太长，超过了 192，那我们就动态扩张，否则保底 192
+    final_w = max(config_w, new_w + pad_x + 16)
     pad_y = (canvas_h - target_digit_h) // 2
-    final_w = new_w + pad_x * 2
 
     final_img = np.zeros((canvas_h, final_w), dtype=np.float32)
     img_resized_norm = img_resized.astype(np.float32) / 255.0
+    img_resized_norm = np.clip(img_resized_norm * 2.0, 0.0, 1.0)
     final_img[pad_y:pad_y + target_digit_h, pad_x:pad_x + new_w] = img_resized_norm
-
+    debug_img = (final_img * 255).astype(np.uint8)
+    cv2.imwrite("debug_model_input.png", debug_img)
     img_tensor = torch.from_numpy(final_img).unsqueeze(0).unsqueeze(0).to(device)
 
     with torch.no_grad():

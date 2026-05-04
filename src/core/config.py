@@ -7,24 +7,25 @@ from pydantic import BaseModel
 
 class DataConfig(BaseModel):
     height: int = 32
-    width: int = 128
-    chars: str = "0123456789"
-    blank_label: int = 10
+    width: int = 192
+    chars: str = "0123456789+-*/="
+    blank_label: int = 15
     emnist_dir: str = "./data"
     augment: bool = True
-    seq_len_range: Tuple[int, int] = (3, 6)
+    seq_len_range: Tuple[int, int] = (4,12)
     val_ratio: float = 0.1
     noise_prob: float = 0.5
     elastic_prob: float = 0.3
-    overlap_range: Tuple[int, int] = (-1,2 )#允许外部控制字符的重叠度
+    overlap_range: Tuple[int, int] = (-4, 0)  # 允许外部控制字符的重叠度
     num_workers: int = 0
 
+
 class ModelConfig(BaseModel):
-    backbone: str = "vgg"
-    hidden_size: int = 256
+    backbone: str = "resnet18"
+    hidden_size: int = 512
     rnn_layers: int = 2
     bidirectional: bool = True
-    dropout: float = 0.2
+    dropout: float = 0.3
 
 
 class SchedulerConfig(BaseModel):
@@ -50,7 +51,7 @@ class TrainConfig(BaseModel):
     save_every: int = 5
     val_every: int = 1
     log_every: int = 50
-    device: str = "auto"
+    device: str = "cuda"
     output_dir: str = "./checkpoints"
     resume: Optional[str] = None
     scheduler: SchedulerConfig = SchedulerConfig()
@@ -59,7 +60,7 @@ class TrainConfig(BaseModel):
 
 class InferenceConfig(BaseModel):
     model_path: str = "./checkpoints/best_ctc.pth"
-    decode_type: str = "greedy"
+    decode_type: str = "beam_search"
     beam_width: int = 5
 
 
@@ -69,9 +70,31 @@ class LoggingConfig(BaseModel):
     print_freq: int = 50
 
 
+# ================= 新增配置类 =================
+class TrackingConfig(BaseModel):
+    enabled: bool = False
+    type: str = "wandb"
+    project: str = "crnn-ocr"
+    entity: Optional[str] = None
+
+
+class MixedPrecisionConfig(BaseModel):
+    enabled: bool = True
+    opt_level: str = "O1"
+
+
+class GradientAccumulationConfig(BaseModel):
+    enabled: bool = False
+    steps: int = 2
+
+
+# ==============================================
+
+
 class Config:
     def __init__(self, config_path: str | None = None):
         self.project_name: str = "crnn_ocr"
+        self.seed: int = 42  # 新增 seed
 
         # 初始化结构
         self.data: DataConfig = DataConfig()
@@ -79,6 +102,11 @@ class Config:
         self.train: TrainConfig = TrainConfig()
         self.inference: InferenceConfig = InferenceConfig()
         self.logging: LoggingConfig = LoggingConfig()
+
+        # 新增结构
+        self.tracking: TrackingConfig = TrackingConfig()
+        self.mixed_precision: MixedPrecisionConfig = MixedPrecisionConfig()
+        self.gradient_accumulation: GradientAccumulationConfig = GradientAccumulationConfig()
 
         # 加载 YAML 覆盖
         if config_path and Path(config_path).exists():
@@ -98,6 +126,8 @@ class Config:
             data = yaml.safe_load(f)
         if 'project_name' in data:
             self.project_name = data['project_name']
+        if 'seed' in data:
+            self.seed = data['seed']
         if 'data' in data:
             self.data = DataConfig(**data['data'])
         if 'model' in data:
@@ -108,14 +138,27 @@ class Config:
             self.inference = InferenceConfig(**data['inference'])
         if 'logging' in data:
             self.logging = LoggingConfig(**data['logging'])
+        # 新增读取逻辑
+        if 'tracking' in data:
+            self.tracking = TrackingConfig(**data['tracking'])
+        if 'mixed_precision' in data:
+            self.mixed_precision = MixedPrecisionConfig(**data['mixed_precision'])
+        if 'gradient_accumulation' in data:
+            self.gradient_accumulation = GradientAccumulationConfig(**data['gradient_accumulation'])
 
     def dump(self, path: str) -> None:
         Path(path).parent.mkdir(parents=True, exist_ok=True)
         with open(path, 'w', encoding='utf-8') as f:
             yaml.dump({
                 'project_name': self.project_name,
+                'seed': self.seed,
                 'data': self.data.model_dump(),
                 'model': self.model.model_dump(),
                 'train': self.train.model_dump(),
-                'inference': self.inference.model_dump()
+                'inference': self.inference.model_dump(),
+                'logging': self.logging.model_dump(),
+                # 新增写入逻辑
+                'tracking': self.tracking.model_dump(),
+                'mixed_precision': self.mixed_precision.model_dump(),
+                'gradient_accumulation': self.gradient_accumulation.model_dump()
             }, f, default_flow_style=False)

@@ -1,10 +1,11 @@
 import torch
 from torch.utils.data import Dataset, DataLoader
+from collections import defaultdict
 from .generator import OCRDataGenerator
 
 
 # ==========================================
-# 🟢 路线 A：CTC 专属翻译官
+# 🟢 路线 A：CTC 专属翻译官 (已升级：支持 Greedy/Beam Search 且大幅提速)
 # ==========================================
 class LabelConverter:
     """处理 CRNN+CTC 的标签转换"""
@@ -16,45 +17,98 @@ class LabelConverter:
         self.idx2char = {idx: char for idx, char in enumerate(chars)}
 
     def encode(self, text_list):
-        # CTC 的标签是变长的 1D Tensor，配合 target_lengths 使用
-        length = [len(s) for s in text_list]
-        targets = []
-        for text in text_list:
-            targets.extend([self.char2idx[c] for c in text])
-        return torch.tensor(targets, dtype=torch.long), torch.tensor(length, dtype=torch.long)
+        lengths = [len(s) for s in text_list]
+        targets = [self.char2idx[c] for text in text_list for c in text]
+        return torch.tensor(targets, dtype=torch.long), torch.tensor(lengths, dtype=torch.long)
 
-    def decode(self, text_idx, length=None):
+    def decode(self, model_output, length=None, decode_type='greedy', beam_size=10):
+        if decode_type == 'greedy':
+            return self._decode_greedy(model_output, length)
+        elif decode_type == 'beam_search':
+            return self._decode_beam_search(model_output, length, beam_size)
+        else:
+            raise ValueError("decode_type 必须是 'greedy' 或 'beam_search'")
+
+    def _decode_greedy(self, text_idx, length=None):
+        if hasattr(text_idx, 'tolist'):
+            text_idx = text_idx.tolist()
+
         if length is not None:
-            # 批量解码
+            if hasattr(length, 'tolist'):
+                length = length.tolist()
             texts = []
             index = 0
             for l in length:
-                t = text_idx[index:index + l]
-                char_list = []
-                for i in range(l):
-                    val = t[i].item() if hasattr(t[i], 'item') else t[i]
-                    if val != self.blank_label:
-                        prev_val = t[i - 1].item() if hasattr(t[i - 1], 'item') else t[i - 1]
-                        if i == 0 or val != prev_val:
-                            # 使用 get 防止越界报错，未知字符标为 ?
-                            char_list.append(self.idx2char.get(val, '?'))
-                texts.append(''.join(char_list))
+                texts.append(self._greedy_single(text_idx[index: index + l]))
                 index += l
             return texts
         else:
-            # 单条解码
-            char_list = []
-            for i in range(len(text_idx)):
-                val = text_idx[i].item() if hasattr(text_idx[i], 'item') else text_idx[i]
-                if val != self.blank_label:
-                    prev_val = text_idx[i - 1].item() if hasattr(text_idx[i - 1], 'item') else text_idx[i - 1]
-                    if i == 0 or val != prev_val:
-                        char_list.append(self.idx2char.get(val, '?'))
-            return ''.join(char_list)
+            return self._greedy_single(text_idx)
+
+    def _greedy_single(self, seq):
+        char_list = []
+        for i, val in enumerate(seq):
+            if val != self.blank_label:
+                if i == 0 or val != seq[i - 1]:
+                    char_list.append(self.idx2char.get(val, '?'))
+        return ''.join(char_list)
+
+    def _decode_beam_search(self, probs, length=None, beam_size=10):
+        if torch.is_tensor(probs):
+            probs = probs.detach().cpu().numpy()
+
+        if length is not None:
+            if hasattr(length, 'tolist'):
+                length = length.tolist()
+            texts = []
+            for i, l in enumerate(length):
+                valid_probs = probs[i, :l, :]
+                texts.append(self._ctc_beam_search_single(valid_probs, beam_size))
+            return texts
+        else:
+            if len(probs.shape) == 3:
+                probs = probs[0]
+            return self._ctc_beam_search_single(probs, beam_size)
+
+    def _ctc_beam_search_single(self, probs, beam_size):
+        T, num_classes = probs.shape
+        beam = {tuple(): (1.0, 0.0)}
+
+        for t in range(T):
+            next_beam = defaultdict(lambda: (0.0, 0.0))
+            for prefix, (p_b, p_nb) in beam.items():
+                p_total = p_b + p_nb
+
+                prob_blank = probs[t, self.blank_label]
+                if prob_blank > 0:
+                    n_p_b, n_p_nb = next_beam[prefix]
+                    next_beam[prefix] = (n_p_b + p_total * prob_blank, n_p_nb)
+
+                for c in range(num_classes):
+                    if c == self.blank_label:
+                        continue
+                    prob_c = probs[t, c]
+                    if prob_c == 0:
+                        continue
+
+                    prefix_extended = prefix + (c,)
+                    n_p_b, n_p_nb = next_beam[prefix_extended]
+
+                    if len(prefix) > 0 and c == prefix[-1]:
+                        next_beam[prefix_extended] = (n_p_b, n_p_nb + p_b * prob_c)
+                        n_p_b_old, n_p_nb_old = next_beam[prefix]
+                        next_beam[prefix] = (n_p_b_old, n_p_nb_old + p_nb * prob_c)
+                    else:
+                        next_beam[prefix_extended] = (n_p_b, n_p_nb + p_total * prob_c)
+
+            beam = dict(sorted(next_beam.items(), key=lambda x: x[1][0] + x[1][1], reverse=True)[:beam_size])
+
+        best_prefix = max(beam.keys(), key=lambda k: beam[k][0] + beam[k][1])
+        return ''.join([self.idx2char.get(idx, '?') for idx in best_prefix])
 
 
 # ==========================================
-# 🔴 路线 B：Attention 专属翻译官
+# 🔴 路线 B：Attention 专属翻译官 (已去除了掉速的 item() 调用)
 # ==========================================
 class AttentionLabelConverter:
     """处理 Seq2Seq+Attention 的标签转换"""
@@ -74,7 +128,6 @@ class AttentionLabelConverter:
         self.idx2char = {idx: char for idx, char in enumerate(chars)}
 
     def encode(self, text_list):
-        """把文字标签变成张量，比如 '123' 变成 [1, 2, 3, EOS, PAD, PAD...]"""
         batch_size = len(text_list)
         targets = torch.full((batch_size, self.max_seq_len), self.pad_idx, dtype=torch.long)
 
@@ -87,13 +140,14 @@ class AttentionLabelConverter:
         return targets
 
     def decode(self, pred_idx):
-        """把模型的输出数字翻译回人类文字"""
+        # 优化：提前转为 Python List，大幅提升解码速度
+        if hasattr(pred_idx, 'tolist'):
+            pred_idx = pred_idx.tolist()
+
         result = []
         for seq in pred_idx:
             text = ""
             for idx in seq:
-                if isinstance(idx, torch.Tensor):
-                    idx = idx.item()
                 if idx == self.eos_idx:  # 遇到结束符，立刻停止翻译！
                     break
                 if idx < len(self.chars):
@@ -107,48 +161,47 @@ class AttentionLabelConverter:
 # ==========================================
 class OCRDataset(Dataset):
     def __init__(self, config, is_train=True):
-        self.generator = OCRDataGenerator(config)
-        # 根据你的配置，算出一个 epoch 大概要跑多少张图
-        self.length = config.train.epochs * 1000 if is_train else 500
+        self.is_train = is_train
+
+        # 1. 隔离配置：验证集绝对不能有数据增强
+        import copy
+        local_config = copy.deepcopy(config)
+        if not is_train:
+            local_config.data.augment = False  # 强制关闭验证集的数据增强
+
+        self.generator = OCRDataGenerator(local_config)
+
+        # 2. 定义单个 Epoch 的数据量 (千万不要乘以 epochs 数量)
+        self.length = 10000 if is_train else 1000
+
+        # 3. 验证集固化：考试用同一张试卷！
+        self.val_cache = []
+        if not is_train:
+            print("⏳ 正在预生成固定的验证集，请稍候...")
+            import random
+            # 临时固定随机种子，确保每次重新启动训练，验证集题目是一样的
+            random.seed(42)
+            for _ in range(self.length):
+                self.val_cache.append(self.generator.generate_sample())
+            random.seed()  # 恢复系统的随机状态，不影响后续训练
 
     def __len__(self):
         return self.length
 
     def __getitem__(self, idx):
-        img_np, label = self.generator.generate_sample()
+        if self.is_train:
+            # 训练集：无限动态生成，每次都不一样
+            img_np, label = self.generator.generate_sample()
+        else:
+            # 验证集：直接从初始化好的题库里拿，保证一致性
+            img_np, label = self.val_cache[idx]
+
         img_tensor = torch.from_numpy(img_np).float()
 
         # ⚡️ 核心修复：维度自适应
-        # 如果 generator 返回的是 (32, 128) 二维灰度图，加上通道维度变成 (1, 32, 128)
         if img_tensor.dim() == 2:
             img_tensor = img_tensor.unsqueeze(0)
-        # 如果它已经是 (1, 32, 128) 或类似的三维矩阵了，就什么都不做，防止维度爆炸
         elif img_tensor.dim() == 3 and img_tensor.shape[2] == 1:
-            # 如果形状是 (32, 128, 1) 这种通道在最后的，把它挪到前面变成 (1, 32, 128)
             img_tensor = img_tensor.permute(2, 0, 1)
 
         return img_tensor, label
-
-
-def build_dataloaders(config):
-    """注意：这里返回的标签还是纯字符串，真正的 Tensor 转换交给了 Engine！"""
-    train_dataset = OCRDataset(config, is_train=True)
-    val_dataset = OCRDataset(config, is_train=False)
-
-    train_loader = DataLoader(
-        train_dataset,
-        batch_size=config.train.batch_size,
-        shuffle=True,
-        num_workers=config.data.num_workers,
-        pin_memory=True
-    )
-
-    val_loader = DataLoader(
-        val_dataset,
-        batch_size=config.train.batch_size,
-        shuffle=False,
-        num_workers=config.data.num_workers,
-        pin_memory=True
-    )
-
-    return train_loader, val_loader

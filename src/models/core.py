@@ -11,16 +11,16 @@ class OCR_ResNet18(nn.Module):
         super().__init__()
         self.inplanes = 64
         # 这里的变量名必须和原来一模一样，不能放进 Sequential 里
-        self.conv1 = nn.Conv2d(img_channel, 64, kernel_size=3, stride=1, padding=1, bias=False)
-        self.bn1 = nn.BatchNorm2d(64)
-        self.relu = nn.ReLU(inplace=True)
-        self.maxpool = nn.MaxPool2d(kernel_size=2, stride=2, padding=0)
+        self.conv1 = nn.Conv2d(img_channel, 64, kernel_size=3, stride=1, padding=1, bias=False)#特征提取
+        self.bn1 = nn.BatchNorm2d(64)#校准归一
+        self.relu = nn.ReLU(inplace=True)#过滤
+        self.maxpool = nn.MaxPool2d(kernel_size=2, stride=2, padding=0)#浓缩
 
         self.layer1 = self._make_layer(BasicBlock, 64, 2)
-        self.layer2 = self._make_layer(BasicBlock, 128, 2, stride=2)
+        self.layer2 = self._make_layer(BasicBlock, 128, 2, stride=2)#特征扩增
         self.layer3 = self._make_layer(BasicBlock, 256, 2, stride=(2, 1))
         self.layer4 = self._make_layer(BasicBlock, 512, 2, stride=(2, 1))
-        self.out_pool = nn.AdaptiveAvgPool2d((1, None))
+        self.out_pool = nn.AdaptiveAvgPool2d((1, None))#高度压缩
 
     def _make_layer(self, block, planes, blocks, stride=1):
         downsample = None
@@ -55,15 +55,15 @@ class BidirectionalLSTM(nn.Module):
 
     def __init__(self, nIn, nHidden, nOut, dropout=0.0):
         super().__init__()
-        self.rnn = nn.LSTM(nIn, nHidden, bidirectional=True, batch_first=False)
-        self.embedding = nn.Linear(nHidden * 2, nOut)
+        self.rnn = nn.LSTM(nIn, nHidden, bidirectional=True, batch_first=False)#捕捉字符之间的前后关系
+        self.embedding = nn.Linear(nHidden * 2, nOut)#结合双向关系根据概率得出是啥
         self.dropout = nn.Dropout(dropout)
 
     def forward(self, x):
-        recurrent, _ = self.rnn(x)
-        T, B, H = recurrent.size()
-        t_rec = recurrent.view(T * B, H)
-        output = self.embedding(t_rec)
+        recurrent, _ = self.rnn(x)#推断前后字符关系（双向）
+        T, B, H = recurrent.size()#测算大小序列小条，一次处理图片个数
+        t_rec = recurrent.view(T * B, H)#准备数据
+        output = self.embedding(t_rec)#推测
         output = self.dropout(output)
         output = output.view(T, B, -1)
         return output
@@ -71,11 +71,9 @@ class BidirectionalLSTM(nn.Module):
 
 class CRNN(nn.Module):
     """完美兼容旧权重的端到端架构"""
-
     def __init__(self, img_channel=1, num_classes=11, hidden_size=256, rnn_layers=2, dropout=0.2):
         super().__init__()
         self.cnn = OCR_ResNet18(img_channel)
-
         # 必须使用 add_module 并保持命名一致，才能对上锁
         self.rnn = nn.Sequential()
         if rnn_layers == 1:
@@ -83,9 +81,8 @@ class CRNN(nn.Module):
         else:
             self.rnn.add_module("BiLSTM1", BidirectionalLSTM(512, hidden_size, hidden_size, dropout))
             self.rnn.add_module("BiLSTM2", BidirectionalLSTM(hidden_size, hidden_size, num_classes, dropout))
-
     def forward(self, x):
-        conv = self.cnn(x)
+        conv = self.cnn(x)#获取512特征数据
         conv = conv.squeeze(2).permute(2, 0, 1)
         output = self.rnn(conv)
         return output
