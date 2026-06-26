@@ -7,8 +7,6 @@ import random
 
 
 class EMNISTSource:
-    """EMNIST数据源管理"""
-
     def __init__(self, data_dir: str, split: str = 'digits'):
         self.data_dir = data_dir
         self.split = split
@@ -16,9 +14,7 @@ class EMNISTSource:
         self.indices_by_label = {
             i: np.where(self.labels == i)[0] for i in range(10)
         }
-
     def _load_data(self) -> Tuple[np.ndarray, np.ndarray]:
-        """加载并预处理EMNIST数据"""
         dataset = datasets.EMNIST(
             root=self.data_dir,
             split=self.split,
@@ -26,12 +22,9 @@ class EMNISTSource:
             download=true,
             transform=transforms.ToTensor()
         )
-
         images = dataset.data.float().numpy() / 255.0
         labels = dataset.targets.numpy()
-        # 修复旋转问题 (EMNIST默认旋转了90度)
         images = np.transpose(images, (0, 2, 1))
-
         return images, labels
 
     def get_random_digit(self) -> Tuple[np.ndarray, str]:

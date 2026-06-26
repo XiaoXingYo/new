@@ -1,13 +1,16 @@
+import time
 import torch
 from tqdm import tqdm
 from pathlib import Path
 import cv2
 import numpy as np
 
+# 🌟 新增：导入 CER 计算函数
+from src.core.metrics import calculate_cer
+
 
 class OCREngine:
-    """高度内聚的训练与推理引擎 (已加入阶段分离、动态解码、混合精度与梯度累积)"""
-
+    """高度内聚的训练与推理引擎 (兼容 CTC 与 Attention，支持 CER 与 FPS 测算)"""
     def __init__(self, model, device, converter, config):
         self.model = model.to(device)
         self.device = device
@@ -15,23 +18,17 @@ class OCREngine:
         self.cfg = config
         self.train_batch_saved = False
         self.eval_count = 0
-        self.current_stage = "Default"  # 🌟 记录当前训练阶段
-
-        # 🌟 初始化混合精度 Scaler (已修复：使用新版 torch.amp API)
+        self.current_stage = "Default"
         self.use_amp = self.cfg.mixed_precision.enabled
         self.scaler = torch.amp.GradScaler('cuda', enabled=self.use_amp)
-
-        # 🌟 初始化梯度累积步数
         self.accum_steps = self.cfg.gradient_accumulation.steps if self.cfg.gradient_accumulation.enabled else 1
+        self.is_attention = hasattr(model, 'attention')
 
     def train_loop(self, train_loader, optimizer, criterion):
         self.model.train()
         total_loss = 0
         pbar = tqdm(train_loader, desc="Training")
-
-        # 梯度清零，为梯度累积做准备
         optimizer.zero_grad()
-
         for step, (images, labels_str) in enumerate(pbar):
             if not self.train_batch_saved:
                 try:
@@ -46,76 +43,59 @@ class OCREngine:
                 except Exception:
                     pass
                 self.train_batch_saved = True
-
             images = images.to(self.device)
-            targets, target_lengths = self.converter.encode(labels_str)
-
-            # 🌟 开启混合精度上下文 (已修复：使用新版 torch.amp API)
             with torch.amp.autocast('cuda', enabled=self.use_amp):
-                preds = self.model(images)
-                preds_log = preds.log_softmax(2)
-
-                input_lengths = torch.full((images.size(0),), preds.size(0), dtype=torch.long)
-                loss = criterion(preds_log, targets.to(self.device), input_lengths, target_lengths.to(self.device))
-
-                # 🌟 梯度累积：按比例缩放 Loss
+                if self.is_attention:
+                    targets = self.converter.encode(labels_str).to(self.device)
+                    preds = self.model(images, targets)
+                    loss = criterion(preds.view(-1, preds.size(-1)), targets.view(-1))
+                else:
+                    targets, target_lengths = self.converter.encode(labels_str)
+                    preds = self.model(images)
+                    preds_log = preds.log_softmax(2)
+                    input_lengths = torch.full((images.size(0),), preds.size(0), dtype=torch.long)
+                    loss = criterion(preds_log, targets.to(self.device), input_lengths, target_lengths.to(self.device))
                 loss = loss / self.accum_steps
-
-            # 🌟 混合精度 Backward
             self.scaler.scale(loss).backward()
-
-            # 🌟 梯度累积：达到指定步数才更新权重
             if (step + 1) % self.accum_steps == 0 or (step + 1) == len(train_loader):
-                # 解除缩放，以便进行梯度裁剪
                 self.scaler.unscale_(optimizer)
                 torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=self.cfg.train.grad_clip)
-
-                # Optimizer Step & Scaler Update
                 self.scaler.step(optimizer)
                 self.scaler.update()
-
-                # 更新后清空梯度
                 optimizer.zero_grad()
-
-            # 恢复真实的 loss 用于日志打印
             real_loss = loss.item() * self.accum_steps
             total_loss += real_loss
             pbar.set_postfix({'loss': f"{real_loss:.4f}"})
-
         return total_loss / len(train_loader)
 
     @torch.no_grad()
     def evaluate(self, val_loader):
         self.model.eval()
         correct, total = 0, 0
+        total_cer = 0.0
         self.eval_count += 1
-
+        start_time = time.time()
         epoch_error_dir = Path(f"logs/bad_cases/{self.current_stage}/epoch_{self.eval_count:02d}")
-
-        # 🌟 修复：改为面向对象的属性调用
         decode_type = self.cfg.inference.decode_type
         beam_width = self.cfg.inference.beam_width
-
         for images, labels_str in tqdm(val_loader, desc=f"Evaluating ({decode_type})"):
             images = images.to(self.device)
-
-            # 推理阶段同样可以使用 autocast 提速 (已修复：使用新版 torch.amp API)
             with torch.amp.autocast('cuda', enabled=self.use_amp):
-                preds = self.model(images)  # 形状: [Sequence_Length, Batch_Size, Num_Classes]
-
-            # 🌟 根据配置准备解码输入
-            if decode_type == 'beam_search':
-                probs = torch.nn.functional.softmax(preds, dim=2).permute(1, 0, 2)
+                preds = self.model(images)
+            if self.is_attention:
+                pred_indices = preds.argmax(2)
+                pred_strs = self.converter.decode(pred_indices)
             else:
-                pred_indices = preds.argmax(2).permute(1, 0)
-
-            for i, label in enumerate(labels_str):
-                # 🌟 调用不同的解码策略
                 if decode_type == 'beam_search':
-                    pred_str = self.converter.decode(probs[i], decode_type='beam_search', beam_size=beam_width)
+                    probs = torch.nn.functional.softmax(preds, dim=2).permute(1, 0, 2)
+                    pred_strs = [self.converter.decode(probs[i], decode_type='beam_search', beam_size=beam_width) for i
+                                 in range(len(labels_str))]
                 else:
-                    pred_str = self.converter.decode(pred_indices[i], decode_type='greedy')
-
+                    pred_indices = preds.argmax(2).permute(1, 0)
+                    pred_strs = [self.converter.decode(pred_indices[i], decode_type='greedy') for i in
+                                 range(len(labels_str))]
+            for i, label in enumerate(labels_str):
+                pred_str = pred_strs[i]
                 if pred_str == label:
                     correct += 1
                 else:
@@ -135,25 +115,27 @@ class OCREngine:
                         cv2.imwrite(str(epoch_error_dir / filename), img_tensor)
                     except Exception:
                         pass
+                total_cer += calculate_cer(pred_str, label)
                 total += 1
-        return correct / total
-
+        eval_time = time.time() - start_time
+        fps = total / eval_time if eval_time > 0 else 0
+        avg_acc = correct / total
+        avg_cer = total_cer / total
+        return avg_acc, avg_cer, fps
     @torch.no_grad()
     def infer(self, image_tensor):
         self.model.eval()
-
-        # 推理阶段同样可以使用 autocast 提速 (已修复：使用新版 torch.amp API)
         with torch.amp.autocast('cuda', enabled=self.use_amp):
-            preds = self.model(image_tensor.to(self.device))  # 形状: [Sequence_Length, 1, Num_Classes]
-
-        # 🌟 修复：改为面向对象的属性调用
-        decode_type = self.cfg.inference.decode_type
-        beam_width = self.cfg.inference.beam_width
-
-        # 🌟 根据配置执行解码
-        if decode_type == 'beam_search':
-            probs = torch.nn.functional.softmax(preds, dim=2).permute(1, 0, 2)
-            return self.converter.decode(probs[0], decode_type='beam_search', beam_size=beam_width)
+            preds = self.model(image_tensor.to(self.device))
+        if self.is_attention:
+            pred_indices = preds.argmax(2)
+            return self.converter.decode(pred_indices)[0]
         else:
-            pred_indices = preds.argmax(2).permute(1, 0)
-            return self.converter.decode(pred_indices[0], decode_type='greedy')
+            decode_type = self.cfg.inference.decode_type
+            beam_width = self.cfg.inference.beam_width
+            if decode_type == 'beam_search':
+                probs = torch.nn.functional.softmax(preds, dim=2).permute(1, 0, 2)
+                return self.converter.decode(probs[0], decode_type='beam_search', beam_size=beam_width)
+            else:
+                pred_indices = preds.argmax(2).permute(1, 0)
+                return self.converter.decode(pred_indices[0], decode_type='greedy')

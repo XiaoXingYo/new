@@ -60,12 +60,25 @@
             font-size: 24px;
             color: #1f2937;
             min-height: 40px;
-            font-weight: bold;
-            padding: 10px;
+            font-weight: normal;
+            padding: 15px;
             border-radius: 8px;
             background: #f9fafb;
+            border: 1px solid #e5e7eb;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 15px;
         }
-        .calc-res { color: #f59e0b; margin-left: 15px; }
+
+        /* 🌟 新增：排版与徽章样式 */
+        .raw-text { color: #4b5563; }
+        .calc-res { color: #059669; font-weight: bold; font-size: 28px; }
+        .success-badge {
+            background: #d1fae5; color: #047857;
+            font-size: 14px; padding: 4px 10px; border-radius: 20px;
+            font-weight: bold; display: flex; align-items: center; gap: 5px;
+        }
     </style>
 </head>
 <body>
@@ -76,7 +89,7 @@
         <div class="btn-group">
             <button class="btn-reset" onclick="resetCanvas()">↻ 重置</button>
             <button class="btn-erase" id="btnErase" onclick="toggleErase()">▱ 擦除</button>
-            <button class="btn-submit" onclick="submitCanvas()">↑ 提交</button>
+            <button class="btn-submit" onclick="submitCanvas()">↑ 提交识别</button>
         </div>
 
         <div id="result-box">等待输入...</div>
@@ -91,7 +104,6 @@
         let isDrawing = false, lastX = 0, lastY = 0;
         let isEraser = false;
 
-        // --- 新增：全局点击收起侧边栏逻辑 ---
         function notifyParentToCollapse() {
             if (window.parent && window.parent.collapseSidebar) {
                 window.parent.collapseSidebar();
@@ -99,7 +111,6 @@
         }
         document.addEventListener('mousedown', notifyParentToCollapse);
         document.addEventListener('touchstart', notifyParentToCollapse);
-        // -----------------------------------
 
         function initCanvas() {
             ctx.fillStyle = "#ffffff";
@@ -166,7 +177,7 @@
         window.addEventListener('touchend', end);
 
         async function submitCanvas() {
-            resultBox.innerText = "视觉解析中...";
+            resultBox.innerHTML = '<span style="color: #6b7280;">⚙️ 底层视觉引擎解析中...</span>';
             try {
                 const base64Data = canvas.toDataURL('image/jpeg');
                 const res = await fetch('/api/recognize', {
@@ -176,10 +187,17 @@
                 });
                 const data = await res.json();
 
-                if (data.calc) {
-                    resultBox.innerHTML = `识别: ${data.result} <span class="calc-res">答案: ${data.calc}</span>`;
+                // 🌟 核心渲染更新：更漂亮的高亮展示
+                if (data.calc && data.calc !== "?") {
+                    resultBox.innerHTML = `
+                        <span class="raw-text">识别原文：${data.result}</span>
+                        <span class="calc-res">➡️ 结果：${data.calc}</span>
+                        <span class="success-badge">✔️ 引擎计算通过</span>
+                    `;
+                } else if(data.result) {
+                    resultBox.innerHTML = `<span class="raw-text">识别序列：${data.result}</span>`;
                 } else {
-                    resultBox.innerText = `识别: ${data.result}`;
+                    resultBox.innerText = "未识别到有效特征，请重试";
                 }
             } catch (err) {
                 resultBox.innerText = "引擎连接中断，请检查后端运行状态。";

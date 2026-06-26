@@ -25,11 +25,9 @@
         h1 { color: #1f2937; margin-bottom: 10px; }
         .subtitle { color: #6b7280; margin-bottom: 15px; font-size: 14px; }
 
-        /* 状态栏 */
         .stats { margin-bottom: 20px; font-size: 16px; font-weight: bold; color: #4b5563; }
         #timer { color: #f59e0b; font-family: monospace; font-size: 18px; }
 
-        /* 数独棋盘样式 */
         #sudoku-board {
             display: grid;
             border: 3px solid var(--border-color);
@@ -56,13 +54,11 @@
         .invalid { color: #ef4444; background-color: var(--error); }
         .user-filled { color: var(--primary); font-family: "Comic Sans MS", cursive, sans-serif; }
 
-        /* 底部控制栏 */
         .controls { display: flex; gap: 15px; align-items: center; }
         select { padding: 10px; border-radius: 6px; border: 1px solid #dcdde1; outline: none; font-size: 14px; background: white;}
         .btn-new { background: var(--primary); color: white; border: none; padding: 10px 20px; border-radius: 6px; font-size: 16px; cursor: pointer; font-weight: bold;}
         .btn-new:hover { background: #2563eb; }
 
-        /* 画板遮罩层 */
         #modal-overlay {
             display: none;
             position: fixed; top: 0; left: 0; width: 100%; height: 100%;
@@ -95,12 +91,23 @@
         .btn-submit { background: var(--primary); } .btn-submit:hover { background: #2563eb; }
 
         #result-box { font-size: 16px; color: #6b7280; min-height: 20px; }
+
+        /* 🌟 胜利弹窗样式 */
+        .win-message {
+            display: none;
+            background: #10b981; color: white; padding: 15px 30px; border-radius: 8px; font-size: 18px; font-weight: bold; margin-bottom: 20px; box-shadow: 0 4px 6px rgba(16, 185, 129, 0.2);
+            animation: popIn 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
+        }
+        @keyframes popIn { from { transform: scale(0.8); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+
     </style>
 </head>
 <body>
 
     <h1>手写数独</h1>
     <div class="subtitle">点击空白格子，进行手写识别</div>
+
+    <div id="win-banner" class="win-message">🎉 恭喜！视觉识别引擎协助您完成了挑战！</div>
 
     <div class="stats">
         规模: <span id="display-size">9x9</span> |
@@ -127,7 +134,7 @@
     <div id="modal-overlay">
         <div class="canvas-container">
             <span class="close-btn" onclick="closePad()">✖</span>
-            <h3 id="pad-title">请写下一个数字</h3>
+            <h3 id="pad-title">请写下数字</h3>
             <canvas id="board" width="300" height="300"></canvas>
 
             <div class="btn-group">
@@ -140,7 +147,6 @@
     </div>
 
     <script>
-        // --- 新增：全局点击收起侧边栏逻辑 ---
         function notifyParentToCollapse() {
             if (window.parent && window.parent.collapseSidebar) {
                 window.parent.collapseSidebar();
@@ -148,9 +154,9 @@
         }
         document.addEventListener('mousedown', notifyParentToCollapse);
         document.addEventListener('touchstart', notifyParentToCollapse);
-        // -----------------------------------
 
         const boardElement = document.getElementById('sudoku-board');
+        const winBanner = document.getElementById('win-banner');
         let solution = [];
         let currentTargetCell = null;
         let currentSize = 9;
@@ -193,6 +199,7 @@
         }
 
         function newGame() {
+            winBanner.style.display = 'none'; // 隐藏胜利提示
             currentSize = parseInt(document.getElementById('size-select').value);
             const diffRate = parseFloat(document.getElementById('diff-select').value);
 
@@ -268,12 +275,25 @@
             }
         }
 
-        function checkWin() {
+        async function checkWin() {
             const cells = document.querySelectorAll('.cell');
             const win = Array.from(cells).every(c => c.innerText != '' && !c.classList.contains('invalid'));
             if (win) {
                 clearInterval(timerInterval);
-                alert(`太厉害了！AI 和你一起用时 ${document.getElementById('timer').innerText} 完成了挑战！`);
+
+                // 🌟 核心：在此向后端发起胜利结算请求，记录相应的学习进度
+                try {
+                    await fetch('/api/sudoku/win', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({ size: currentSize })
+                    });
+                } catch(e) {
+                    console.error("更新进度失败:", e);
+                }
+
+                winBanner.innerHTML = `🎉 太厉害了！AI引擎和你一起用时 <b>${document.getElementById('timer').innerText}</b> 完成了挑战！`;
+                winBanner.style.display = 'block';
             }
         }
 

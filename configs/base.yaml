@@ -35,14 +35,12 @@ train:
   output_dir: "./checkpoints"
   resume: null
   scheduler:
-#    type: "CosineAnnealingLR"  # 改成余弦退火
-#    T_max: 30                  # 新增这个参数，通常设置为你的 epochs 数量 (30)
+#    type: "CosineAnnealingLR"
+#    T_max: 30
     type: "OneCycleLR"  # OneCycleLR/StepLR/CosineAnnealingLR
     pct_start: 0.1      # WarmUp占比
     div_factor: 25      # 初始lr = max_lr / div_factor
     final_div_factor: 1000  # 最终lr = max_lr / final_div_factor
-
-  # --- 新增：早停机制 ---
   early_stopping:
     enabled: true
     patience: 10        # CER不下降的最大epoch数
@@ -54,28 +52,24 @@ inference:
   decode_type: "beam_search"  # greedy/beam_search
   beam_width: 5
 
-# --- 新增：日志与监控 ---
+# 日志
 logging:
   level: "INFO"  # DEBUG/INFO/WARNING/ERROR
   log_dir: "./logs"
   print_freq: 50  # 控制台打印频率
 
-# --- 新增：实验追踪（可选） ---
 tracking:
   enabled: false  # 设为true需安装wandb/tensorboard
   type: "wandb"   # wandb/tensorboard
   project: "crnn-ocr"
   entity: null    # wandb团队名
-
-# --- 新增：混合精度训练 ---
 mixed_precision:
   enabled: true  # 需要GPU和PyTorch>=1.6
   opt_level: "O1"  # apex/mixed precision level
 
-# --- 新增：梯度累积 ---
 gradient_accumulation:
   enabled: true          #基础false
   steps: 2  # 基础模拟batch_size * 4的大批次
 
-# --- 新增：可复现性 ---
+# --- 可复现性 ---
 seed: 42  # 随机种子

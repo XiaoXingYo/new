@@ -3,6 +3,7 @@ import sys
 import io
 import base64
 import re
+import json
 from pathlib import Path
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
@@ -11,6 +12,8 @@ from PIL import Image
 import torch
 import numpy as np
 import cv2
+from datetime import date
+
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
@@ -19,8 +22,44 @@ from src.core.config import Config
 
 app = FastAPI()
 
+USER_STATS_FILE = PROJECT_ROOT / "user_stats.json"
 
-# 🌟 1. 极致精简版翻译官 (彻底脱离对 src/data 文件夹的依赖)
+
+def get_user_stats():
+    """读取用户数据，如果不存在则自动创建默认的基础数据"""
+    if not USER_STATS_FILE.exists():
+        default_data = {
+            "username": "Malinowski",
+            "medals": 3,
+            "progress": {
+                "easy": {"solved": 46, "total": 1060},
+                "medium": {"solved": 22, "total": 2246},
+                "hard": {"solved": 1, "total": 997}
+            },
+            "activity": {
+                "streakDays": 3,
+                "totalDays": 28,
+                "totalSubmissions": 69,
+                "lastSubmitDate": ""
+            }
+        }
+        with open(USER_STATS_FILE, 'w', encoding='utf-8') as f:
+            json.dump(default_data, f, ensure_ascii=False, indent=4)
+        return default_data
+    else:
+        with open(USER_STATS_FILE, 'r', encoding='utf-8') as f:
+            return json.load(f)
+
+
+def save_user_stats(data):
+    """保存更新后的用户数据到 JSON 文件"""
+    with open(USER_STATS_FILE, 'w', encoding='utf-8') as f:
+        json.dump(data, f, ensure_ascii=False, indent=4)
+
+
+# ==========================================
+
+# 1. 极致精简版翻译官
 class LabelConverter:
     def __init__(self, chars, blank_label):
         self.chars = chars
@@ -31,7 +70,6 @@ class LabelConverter:
         for i, idx in enumerate(indices):
             val = idx.item()
             if val != self.blank_label:
-                # CTC 规则：忽略连续重复的字符
                 if i == 0 or val != indices[i - 1].item():
                     if val < len(self.chars):
                         result.append(self.chars[val])
@@ -43,7 +81,6 @@ cfg = Config(str(PROJECT_ROOT / "configs/base.yaml"))
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 model = CRNN(num_classes=len(cfg.data.chars) + 1).to(device)
 
-# 尝试加载权重 (即便没有权重，也能启动画板，只是识别结果是乱码)
 ckpt_path = PROJECT_ROOT / cfg.inference.model_path
 if ckpt_path.exists():
     model.load_state_dict(torch.load(str(ckpt_path), map_location=device)['model'])
@@ -56,7 +93,12 @@ class ImageData(BaseModel):
     image_base64: str
 
 
-# 3. 底层数学解析器 (双栈结构，拒绝 eval 黑盒)
+# 用于接收数独胜利状态的数据模型
+class SudokuWinData(BaseModel):
+    size: int
+
+
+# 3. 底层数学解析器
 def stack_calculator(expression: str) -> str:
     expr = expression.replace('=', '').strip()
     expr = expr.replace('x', '*').replace('X', '*').replace('×', '*').replace('÷', '/')
@@ -114,7 +156,6 @@ async def recognize(data: ImageData):
     x_max = max([cv2.boundingRect(c)[0] + cv2.boundingRect(c)[2] for c in contours])
     y_max = max([cv2.boundingRect(c)[1] + cv2.boundingRect(c)[3] for c in contours])
 
-    # 🌟 修复 1：裁剪前留出 5 像素安全边距，防止膨胀时边缘被截断！
     margin = 5
     x_min = max(0, x_min - margin)
     y_min = max(0, y_min - margin)
@@ -123,26 +164,20 @@ async def recognize(data: ImageData):
 
     img_cropped = img_cv[y_min:y_max, x_min:x_max]
 
-    # 🌟 修复 2：针对拥挤字符，改用 2x2 的微小内核，或者直接注释掉这行不膨胀！
-    # kernel = np.ones((2, 2), np.uint8)
-    # img_cropped = cv2.dilate(img_cropped, kernel, iterations=1)
-
     h, w = img_cropped.shape
 
-    # 🌟 修复 3：底层防御，绝不允许除零错误干倒我们的服务！
     if h == 0 or w == 0:
         return {"result": "无效图像", "calc": ""}
 
     target_digit_h = 28
     scale = target_digit_h / float(h)
-    new_w = max(1, int(w * scale*1.3))
+    new_w = max(1, int(w * scale * 1.3))
     img_resized = cv2.resize(img_cropped, (new_w, target_digit_h), interpolation=cv2.INTER_AREA)
     kernel = cv2.getStructuringElement(cv2.MORPH_CROSS, (2, 2))
     img_resized = cv2.dilate(img_resized, kernel, iterations=1)
     canvas_h = 32
     config_w = 192
-    pad_x = 24  # 模拟训练集 x_cursor 的起始位置
-    # 如果用户写得实在太长，超过了 192，那我们就动态扩张，否则保底 192
+    pad_x = 24
     final_w = max(config_w, new_w + pad_x + 16)
     pad_y = (canvas_h - target_digit_h) // 2
 
@@ -160,7 +195,54 @@ async def recognize(data: ImageData):
         pred_str = converter.decode(pred_indices[0])
 
     calc_res = stack_calculator(pred_str) if '=' in pred_str else ""
+
+    # ==========================================
+    # 🌟 核心：触发识别后，自动累加用户的JSON数据
+    # ==========================================
+    if pred_str:
+        stats = get_user_stats()
+        # 画板和数独每次调用识别时，都将让热力图活跃提交增加1
+        stats["activity"]["totalSubmissions"] += 1
+
+        # 🌟 修改 1：删除了之前给“简单题”进度的代码。算式不再计入难度。
+
+        # 🌟 修改 2：检测今天是否已经提交过，如果没有，累加天数
+        today_str = str(date.today())
+        if stats["activity"].get("lastSubmitDate") != today_str:
+            stats["activity"]["lastSubmitDate"] = today_str
+            stats["activity"]["totalDays"] += 1
+            stats["activity"]["streakDays"] += 1
+
+        save_user_stats(stats)
+
     return {"result": pred_str, "calc": calc_res}
+
+
+# ==========================================
+# 🌟 API 端点：专门给前端看板提供 JSON 数据
+# ==========================================
+@app.get("/api/user/profile")
+async def get_user_profile():
+    return get_user_stats()
+
+
+# ==========================================
+# 🌟 API 端点：处理数独通关，关联三大难度
+# ==========================================
+@app.post("/api/sudoku/win")
+async def sudoku_win(data: SudokuWinData):
+    stats = get_user_stats()
+
+    # 🌟 修改 3：只有数独通关，才会增加上方的进度条！
+    if data.size == 4:
+        stats["progress"]["easy"]["solved"] += 1
+    elif data.size == 6:
+        stats["progress"]["medium"]["solved"] += 1
+    elif data.size == 9:
+        stats["progress"]["hard"]["solved"] += 1
+
+    save_user_stats(stats)
+    return {"status": "success"}
 
 
 # 5. 挂载画板

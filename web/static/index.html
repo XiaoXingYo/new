@@ -109,7 +109,7 @@
             width: 36px;
             height: 36px;
             border-radius: 50%;
-            background-color: #0288d1;
+            background: linear-gradient(135deg, #0288d1, #26c6da);
             color: white;
             display: flex;
             align-items: center;
@@ -120,9 +120,7 @@
             user-select: none;
             transition: opacity 0.2s;
         }
-        .avatar:hover {
-            opacity: 0.8;
-        }
+        .avatar:hover { opacity: 0.8; }
 
         /* 中间内容区 */
         .content-area {
@@ -189,13 +187,13 @@
                 </button>
             </div>
             <div class="topbar-right">
-                <div class="avatar" onclick="loadApp('profile.html')">M</div>
+                <div class="avatar" id="nav-avatar" onclick="loadApp('profile.html')">U</div>
             </div>
         </header>
 
         <div class="content-area" id="main-content-area">
             <div class="greeting-screen" id="greeting-screen">
-                <h1>Malinowski，你好</h1>
+                <h1 id="greeting-name">加载中...</h1>
                 <h2>今天想让我做点什么？</h2>
             </div>
             <iframe id="app-frame" src=""></iframe>
@@ -203,13 +201,26 @@
     </main>
 
     <script>
-        // 侧边栏折叠/展开逻辑
+        // 🌟 新增：动态拉取用户名
+        async function fetchUserProfile() {
+            try {
+                const res = await fetch('/api/user/profile');
+                const data = await res.json();
+                document.getElementById('greeting-name').innerText = `${data.username}，你好`;
+                document.getElementById('nav-avatar').innerText = data.username.charAt(0).toUpperCase();
+            } catch (err) {
+                document.getElementById('greeting-name').innerText = `开发者，你好`;
+            }
+        }
+
+        // 页面加载时执行
+        document.addEventListener("DOMContentLoaded", fetchUserProfile);
+
         function toggleSidebar() {
             const sidebar = document.getElementById('sidebar');
             sidebar.classList.toggle('collapsed');
         }
 
-        // 专门给子页面和父页面调用的“自动收起”函数
         function collapseSidebar() {
             const sidebar = document.getElementById('sidebar');
             if (!sidebar.classList.contains('collapsed')) {
@@ -217,23 +228,16 @@
             }
         }
 
-        // 加载对应的功能页面
         function loadApp(pageUrl) {
             document.getElementById('greeting-screen').style.display = 'none';
             const appFrame = document.getElementById('app-frame');
             appFrame.style.display = 'block';
             appFrame.src = pageUrl;
-            // 加载页面时，顺便收起侧边栏
             collapseSidebar();
         }
 
-        // 点击父页面的背景时，也自动收起侧边栏
-        document.getElementById('main-content-area').addEventListener('mousedown', function() {
-            collapseSidebar();
-        });
-        document.getElementById('main-content-area').addEventListener('touchstart', function() {
-            collapseSidebar();
-        });
+        document.getElementById('main-content-area').addEventListener('mousedown', collapseSidebar);
+        document.getElementById('main-content-area').addEventListener('touchstart', collapseSidebar);
     </script>
 </body>
 </html>
