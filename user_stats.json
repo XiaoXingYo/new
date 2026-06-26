@@ -1,0 +1,24 @@
+{
+    "username": "Malinowski",
+    "medals": 0,
+    "progress": {
+        "easy": {
+            "solved": 1,
+            "total": 0
+        },
+        "medium": {
+            "solved": 0,
+            "total": 0
+        },
+        "hard": {
+            "solved": 0,
+            "total": 0
+        }
+    },
+    "activity": {
+        "streakDays": 5,
+        "totalDays": 5,
+        "totalSubmissions": 36,
+        "lastSubmitDate": "2026-06-18"
+    }
+}
